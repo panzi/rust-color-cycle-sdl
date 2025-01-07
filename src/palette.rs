@@ -1,4 +1,4 @@
-use std::{fmt::Display, ops::{Index, IndexMut}, time::Instant};
+use std::{fmt::Display, ops::{Index, IndexMut}};
 
 use crate::color::Rgb;
 

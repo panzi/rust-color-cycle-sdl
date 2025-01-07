@@ -71,9 +71,9 @@ impl RgbImage {
         self.data.fill(color);
     }
 
-    pub fn get_rect(&self, x: u32, y: u32, width: u32, height: u32) -> Self {
+    pub fn get_rect_data(&self, x: u32, y: u32, width: u32, height: u32) -> Box<[Rgb]> {
         if x >= self.width || y >= self.height {
-            return Self::new(0, 0);
+            return Box::new([]);
         }
 
         let width = width.min(self.width - x);
@@ -88,11 +88,46 @@ impl RgbImage {
             data[new_offset..new_offset + width as usize].copy_from_slice(&self.data[old_offset..old_offset + width as usize]);
         }
 
+        data
+    }
+
+    #[inline]
+    pub fn get_rect(&self, x: u32, y: u32, width: u32, height: u32) -> Self {
         Self {
             width,
             height,
-            data,
+            data: self.get_rect_data(x, y, width, height),
         }
+    }
+
+    #[inline]
+    pub fn get_rect_from(&mut self, x: u32, y: u32, width: u32, height: u32, other: &RgbImage) {
+        let width = width.min(other.width - x);
+        let height = height.min(other.height - y);
+        self.width = width;
+        self.height = height;
+        self.data = other.get_rect_data(x, y, width, height);
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32, color: Rgb) {
+        if width == self.width && height == self.height {
+            return;
+        }
+
+        let size = width as usize * height as usize;
+        let mut data = unsafe { Box::new_uninit_slice(size).assume_init() };
+        data.fill(color);
+
+        for new_y in 0..height.min(self.height) {
+            let old_offset = new_y as usize * self.width as usize;
+            let new_offset = new_y as usize * width as usize;
+            let copy_width = width.min(self.width);
+            data[new_offset..new_offset + copy_width as usize].copy_from_slice(&self.data[old_offset..old_offset + copy_width as usize]);
+        }
+
+        self.width = width;
+        self.height = height;
+        self.data = data;
     }
 }
 
@@ -181,9 +216,9 @@ impl IndexedImage {
         self.data.fill(index);
     }
 
-    pub fn get_rect(&self, x: u32, y: u32, width: u32, height: u32) -> Self {
+    pub fn get_rect_data(&self, x: u32, y: u32, width: u32, height: u32) -> Box<[u8]> {
         if x >= self.width || y >= self.height {
-            return Self::new(0, 0, self.palette.clone());
+            return Box::new([]);
         }
 
         let width = width.min(self.width - x);
@@ -192,18 +227,33 @@ impl IndexedImage {
 
         let mut data = unsafe { Box::new_uninit_slice(size).assume_init() };
 
-        for new_y in 0..height {
+        for new_y in 0..height.min(self.height) {
             let old_offset = (y + new_y) as usize * self.width as usize + x as usize;
             let new_offset = new_y as usize * width as usize;
-            data[new_offset..new_offset + width as usize].copy_from_slice(&self.data[old_offset..old_offset + width as usize]);
+            let copy_width = width.min(self.width);
+            data[new_offset..new_offset + copy_width as usize].copy_from_slice(&self.data[old_offset..old_offset + copy_width as usize]);
         }
 
+        data
+    }
+
+    #[inline]
+    pub fn get_rect(&self, x: u32, y: u32, width: u32, height: u32) -> Self {
         Self {
             width,
             height,
-            data,
+            data: self.get_rect_data(x, y, width, height),
             palette: self.palette.clone(),
         }
+    }
+
+    #[inline]
+    pub fn get_rect_from(&mut self, x: u32, y: u32, width: u32, height: u32, other: &IndexedImage) {
+        let width = width.min(other.width - x);
+        let height = height.min(other.height - y);
+        self.width = width;
+        self.height = height;
+        self.data = other.get_rect_data(x, y, width, height);
     }
 
     pub fn apply_with_palette(&self, image: &mut RgbImage, palette: &Palette) {
@@ -230,6 +280,26 @@ impl IndexedImage {
             height: self.height,
             data,
         }
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32, index: u8) {
+        if width == self.width && height == self.height {
+            return;
+        }
+
+        let size = width as usize * height as usize;
+        let mut data = unsafe { Box::new_uninit_slice(size).assume_init() };
+        data.fill(index);
+
+        for new_y in 0..height {
+            let old_offset = new_y as usize * self.width as usize;
+            let new_offset = new_y as usize * width as usize;
+            data[new_offset..new_offset + width as usize].copy_from_slice(&self.data[old_offset..old_offset + width as usize]);
+        }
+
+        self.width = width;
+        self.height = height;
+        self.data = data;
     }
 }
 
@@ -321,8 +391,19 @@ impl CycleImage {
         }
     }
 
+    #[inline]
+    pub fn get_rect_from(&mut self, x: u32, y: u32, width: u32, height: u32, other: &CycleImage) {
+        self.indexed_image.get_rect_from(x, y, width, height, &other.indexed_image);
+        self.rgb_image.get_rect_from(x, y, width, height, &other.rgb_image);
+    }
+
     pub fn swap_image_buffer(&mut self, image: &mut RgbImage) {
         std::mem::swap(&mut self.rgb_image, image);
         // TODO: self.rgb_image.resize(self.indexed_image.width(), self.indexed_image.height());
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32, index: u8) {
+        self.indexed_image.resize(width, height, index);
+        self.rgb_image.resize(width, height, self.frame_palette[index]);
     }
 }

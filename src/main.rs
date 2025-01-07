@@ -10,6 +10,7 @@ use std::io::{BufReader, Read, Write};
 use std::path::Path;
 use std::mem::MaybeUninit;
 
+use color::Rgb;
 use image::{CycleImage, RgbImage};
 use image_to_ansi::{image_to_ansi_into, simple_image_to_ansi_into};
 use libc;
@@ -94,6 +95,7 @@ fn interruptable_sleep(duration: Duration) -> bool {
     }
 }
 
+/*
 fn nb_read_avail(mut reader: impl Read, buf: &mut [u8]) -> std::io::Result<usize> {
     match reader.read(buf) {
         Err(err) => {
@@ -110,6 +112,7 @@ fn nb_read_avail(mut reader: impl Read, buf: &mut [u8]) -> std::io::Result<usize
         value => value
     }
 }
+*/
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReadByte {
@@ -151,7 +154,7 @@ fn main() -> std::io::Result<()> {
     let file = File::open(Path::new(&filename))?;
     let reader = BufReader::new(file);
 
-    let mut cycle_image: CycleImage = serde_json::from_reader(reader)?;
+    let cycle_image: CycleImage = serde_json::from_reader(reader)?;
 
     let nbterm = NBTerm::new()?;
     let mut stdin = std::io::stdin().lock();
@@ -171,6 +174,11 @@ fn main() -> std::io::Result<()> {
         }
     };
 
+    let mut viewport = cycle_image.get_rect(
+        0, 0,
+        img_width.min(term_width),
+        img_height.min(term_height));
+
     // TODO: resize prev_frame on window size or x/y pos change
     let mut prev_frame = RgbImage::new(term_width, term_height);
 
@@ -182,6 +190,8 @@ fn main() -> std::io::Result<()> {
     let mut x = 0;
     let mut y = 0;
     let program_start_ts = Instant::now();
+    let mut old_term_width = term_width;
+    let mut old_term_height = term_height;
 
     loop {
         let frame_start_ts = Instant::now();
@@ -194,12 +204,15 @@ fn main() -> std::io::Result<()> {
             (img_width, img_height)
         };
 
+        let old_x = x;
+        let old_y = y;
+
         if img_width <= term_width {
-            x = (term_width - img_width) / 2;
+            x = 0;
         }
 
         if img_height <= term_height {
-            y = (term_height - img_height) / 2;
+            y = 0;
         }
 
         loop {
@@ -347,36 +360,32 @@ fn main() -> std::io::Result<()> {
         }
 
         // render frame
+        if old_x != x || old_y != y || old_term_width != term_width || old_term_height != term_height {
+            viewport.get_rect_from(x, y, term_width, term_height, &cycle_image);
+            prev_frame.resize(viewport.width(), viewport.height(), Rgb([0, 0, 0]));
+        }
+
         // print!(".");
         // let _ = stdout.flush();
-        if let Some((columns, rows)) = term_size {
-            let width = columns as u32;
-            let height = rows as u32 * 2 - 1;
-            //let width = 64;
-            //let height = 64;
-            // TODO: prev_frame.resize(width, height);
-            // TODO: cache cropped image, only animate cropped image etc.
-            let image = cycle_image.rgb_image().get_rect(x, y, width, height);
-            let full_width = image.width() as usize >= columns;
-            image_to_ansi_into(&prev_frame, &image, full_width, &mut linebuf);
-            //simple_image_to_ansi_into(&image, &mut linebuf);
-        } else {
-            image_to_ansi_into(&prev_frame, cycle_image.rgb_image(), true, &mut linebuf);
-            //simple_image_to_ansi_into(cycle_image.rgb_image(), &mut linebuf);
-        }
-        //cycle_image.swap_image_buffer(&mut prev_frame);
+        image_to_ansi_into(&prev_frame, viewport.rgb_image(), true, &mut linebuf);
+        //simple_image_to_ansi_into(viewport.rgb_image(), &mut linebuf);
+
+        viewport.swap_image_buffer(&mut prev_frame);
         //eprintln!("{}", linebuf);
 
         let _ = write!(stdout, "\x1B[1;1H{linebuf}");
         let _ = stdout.flush();
 
-        cycle_image.next_frame((frame_start_ts - program_start_ts).as_secs_f64());
+        viewport.next_frame((frame_start_ts - program_start_ts).as_secs_f64());
 
         // sleep for rest of frame
         let elapsed = frame_start_ts.elapsed();
         if frame_duration > elapsed && !interruptable_sleep(frame_duration - elapsed) {
             break;
         }
+
+        old_term_width  = term_width;
+        old_term_height = term_height;
 
         //break;
     }
