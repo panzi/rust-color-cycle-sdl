@@ -12,7 +12,7 @@ use std::mem::MaybeUninit;
 
 use color::Rgb;
 use image::{CycleImage, RgbImage};
-use image_to_ansi::{image_to_ansi_into, simple_image_to_ansi_into};
+use image_to_ansi::image_to_ansi_into;
 use libc;
 
 pub struct NBTerm;
@@ -30,8 +30,8 @@ impl NBTerm {
             let ttystate = ttystate.assume_init_mut();
 
             // turn off canonical mode
-            //ttystate.c_lflag &= !(libc::ICANON | libc::ECHO);
-            ttystate.c_lflag &= !libc::ICANON;
+            ttystate.c_lflag &= !(libc::ICANON | libc::ECHO);
+            //ttystate.c_lflag &= !libc::ICANON;
 
             // minimum of number input read.
             ttystate.c_cc[libc::VMIN] = 0;
@@ -183,8 +183,8 @@ fn main() -> std::io::Result<()> {
     let mut prev_frame = RgbImage::new(term_width, term_height);
 
     // initial blank screen
-    simple_image_to_ansi_into(&prev_frame, &mut linebuf);
-    let _ = write!(stdout, "\x1B[1;1H{linebuf}");
+    // simple_image_to_ansi_into(&prev_frame, &mut linebuf);
+    let _ = write!(stdout, "\x1B[1;1H\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m\x1B[2J");
     let _ = stdout.flush();
 
     let mut x = 0;

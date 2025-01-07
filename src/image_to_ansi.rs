@@ -68,6 +68,7 @@ pub fn image_to_ansi_into(prev_frame: &RgbImage, image: &RgbImage, full_width: b
 
     for line_y in 0..row_count {
         let y = line_y * 2;
+        let mut line_start = true;
         if y + 1 == image.height() {
             let mut prev_color = Rgb([0, 0, 0]);
             for x in 0..image.width() {
@@ -75,10 +76,11 @@ pub fn image_to_ansi_into(prev_frame: &RgbImage, image: &RgbImage, full_width: b
                 if color != prev_frame.get_pixel(x, y) {
                     move_cursor(curr_x, curr_line_y, x, line_y, lines);
                     let Rgb([r, g, b]) = color;
-                    if color == prev_color {
+                    if !line_start && color == prev_color {
                         lines.push_str("▀");
                     } else {
                         let _ = write!(lines, "\x1B[38;2;{r};{g};{b}m▀");
+                        line_start = false;
                     }
                     prev_color = color;
                     // NOTE: Cursor location doesn't update at the end of the screen.
@@ -106,9 +108,15 @@ pub fn image_to_ansi_into(prev_frame: &RgbImage, image: &RgbImage, full_width: b
                         let _ = write!(lines, "\x1B[38;2;{r1};{g1};{b1}m█");
                         prev_fg = color_top;
                         prev_bg = color_top;
+                        line_start = false;
                     } else {
                         let Rgb([r2, g2, b2]) = color_bottom;
-                        if prev_fg == color_bottom && prev_bg == color_top {
+                        if line_start {
+                            let _ = write!(lines, "\x1B[48;2;{r1};{g1};{b1}m\x1B[38;2;{r2};{g2};{b2}m▄");
+                            prev_fg = color_bottom;
+                            prev_bg = color_top;
+                            line_start = false;
+                        } else if prev_fg == color_bottom && prev_bg == color_top {
                             let _ = write!(lines, "▄");
                         } else if prev_fg == color_top && prev_bg == color_bottom {
                             let _ = write!(lines, "▀");
@@ -192,7 +200,7 @@ pub fn simple_image_to_ansi_into(image: &RgbImage, lines: &mut String) {
             for x in 0..image.width() {
                 let color = image.get_pixel(x, y);
                 let Rgb([r, g, b]) = color;
-                if color == prev_color {
+                if x > 0 && color == prev_color {
                     lines.push_str("▀");
                 } else {
                     let _ = write!(lines, "\x1B[38;2;{r};{g};{b}m▀");
@@ -214,7 +222,12 @@ pub fn simple_image_to_ansi_into(image: &RgbImage, lines: &mut String) {
                     prev_bg = color_top;
                 } else {
                     let Rgb([r2, g2, b2]) = color_bottom;
-                    if prev_fg == color_bottom && prev_bg == color_top {
+                    if x == 0 {
+                        let Rgb([r2, g2, b2]) = color_bottom;
+                        let _ = write!(lines, "\x1B[48;2;{r1};{g1};{b1}m\x1B[38;2;{r2};{g2};{b2}m▄");
+                        prev_fg = color_bottom;
+                        prev_bg = color_top;
+                    } else if prev_fg == color_bottom && prev_bg == color_top {
                         let _ = write!(lines, "▄");
                     } else if prev_fg == color_top && prev_bg == color_bottom {
                         let _ = write!(lines, "▀");
