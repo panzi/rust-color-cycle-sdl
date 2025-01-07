@@ -34,3 +34,20 @@ impl Display for Rgb {
         write!(f, "#{r:02X}{g:02X}{b:02X}")
     }
 }
+
+impl Rgb {
+    #[inline]
+    pub fn r(&self) -> u8 {
+        self.0[0]
+    }
+
+    #[inline]
+    pub fn g(&self) -> u8 {
+        self.0[1]
+    }
+
+    #[inline]
+    pub fn b(&self) -> u8 {
+        self.0[2]
+    }
+}

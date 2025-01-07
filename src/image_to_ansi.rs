@@ -50,8 +50,6 @@ fn move_cursor(curr_x: u32, curr_line_y: u32, x: u32, line_y: u32, lines: &mut S
 }
 
 pub fn image_to_ansi_into(prev_frame: &RgbImage, image: &RgbImage, full_width: bool, lines: &mut String) {
-    let width = image.width();
-    let line_len = (width as usize) * "\x1B[38;2;255;255;255\x1B[48;2;255;255;255m▄".len() + "\x1B[0m".len();
     let row_count = (image.height() + 1) / 2;
 
     lines.clear();
@@ -59,6 +57,9 @@ pub fn image_to_ansi_into(prev_frame: &RgbImage, image: &RgbImage, full_width: b
     if row_count == 0 {
         return;
     }
+
+    let width = image.width();
+    let line_len = (width as usize) * "\x1B[38;2;255;255;255\x1B[48;2;255;255;255m▄".len() + "\x1B[0m".len();
 
     lines.reserve(line_len * row_count as usize + "\x1B[0m".len());
 
@@ -165,4 +166,80 @@ pub fn image_to_ansi_into(prev_frame: &RgbImage, image: &RgbImage, full_width: b
             let _ = write!(lines, "\x1B[{dy}B");
         }
     }
+}
+
+pub fn simple_image_to_ansi_into(image: &RgbImage, lines: &mut String) {
+    let row_count = (image.height() + 1) / 2;
+
+    lines.clear();
+
+    if row_count == 0 {
+        return;
+    }
+
+    let width = image.width();
+    let line_len = (width as usize) * "\x1B[38;2;255;255;255\x1B[48;2;255;255;255m▄".len() + "\x1B[0m".len();
+
+    lines.reserve(line_len * row_count as usize + "\x1B[0m".len());
+
+    lines.push_str("\x1B[1;1H");
+
+    for line_y in 0..row_count {
+        let _ = write!(lines, "\x1B[{};0H", line_y + 1);
+        let y = line_y * 2;
+        if y + 1 == image.height() {
+            let mut prev_color = Rgb([0, 0, 0]);
+            for x in 0..image.width() {
+                let color = image.get_pixel(x, y);
+                let Rgb([r, g, b]) = color;
+                if color == prev_color {
+                    lines.push_str("▀");
+                } else {
+                    let _ = write!(lines, "\x1B[38;2;{r};{g};{b}m▀");
+                }
+                prev_color = color;
+            }
+        } else {
+            let mut prev_bg = Rgb([0, 0, 0]);
+            let mut prev_fg = Rgb([0, 0, 0]);
+            for x in 0..image.width() {
+                let color_top    = image.get_pixel(x, y);
+                let color_bottom = image.get_pixel(x, y + 1);
+
+                let Rgb([r1, g1, b1]) = color_top;
+
+                if color_top == color_bottom {
+                    let _ = write!(lines, "\x1B[38;2;{r1};{g1};{b1}m█");
+                    prev_fg = color_top;
+                    prev_bg = color_top;
+                } else {
+                    let Rgb([r2, g2, b2]) = color_bottom;
+                    if prev_fg == color_bottom && prev_bg == color_top {
+                        let _ = write!(lines, "▄");
+                    } else if prev_fg == color_top && prev_bg == color_bottom {
+                        let _ = write!(lines, "▀");
+                    } else if prev_fg == color_bottom {
+                        let _ = write!(lines, "\x1B[48;2;{r1};{g1};{b1}m▄");
+                        prev_bg = color_top;
+                    } else if prev_fg == color_top {
+                        let _ = write!(lines, "\x1B[48;2;{r2};{g2};{b2}m▀");
+                        prev_bg = color_bottom;
+                    } else if prev_bg == color_top {
+                        let _ = write!(lines, "\x1B[38;2;{r2};{g2};{b2}m▄");
+                        prev_fg = color_bottom;
+                    } else if prev_bg == color_bottom {
+                        let _ = write!(lines, "\x1B[38;2;{r1};{g1};{b1}m▀");
+                        prev_fg = color_top;
+                    } else {
+                        let _ = write!(lines, "\x1B[48;2;{r1};{g1};{b1}m\x1B[38;2;{r2};{g2};{b2}m▄");
+                        prev_fg = color_bottom;
+                        prev_bg = color_top;
+                    }
+                }
+            }
+        }
+
+        //lines.push_str("\x1B[0m\r\n");
+    }
+    lines.push_str("\x1B[0m");
 }

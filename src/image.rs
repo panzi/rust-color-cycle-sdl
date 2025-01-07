@@ -56,13 +56,13 @@ impl RgbImage {
 
     #[inline]
     pub fn get_pixel(&self, x: u32, y: u32) -> Rgb {
-        let offset = self.width as usize * y as usize * 4 + x as usize * 4;
+        let offset = self.width as usize * y as usize + x as usize;
         self.data[offset]
     }
 
     #[inline]
     pub fn set_pixel(&mut self, x: u32, y: u32, color: Rgb) {
-        let offset = self.width as usize * y as usize * 4 + x as usize * 4;
+        let offset = self.width as usize * y as usize + x as usize;
         self.data[offset] = color;
     }
 
@@ -130,7 +130,7 @@ impl IndexedImage {
         }
     }
 
-    pub fn from_buffer(width: u32, height: u32, image: &[u8], palette: Palette) -> Option<Self> {
+    pub fn from_buffer(width: u32, height: u32, image: Box<[u8]>, palette: Palette) -> Option<Self> {
         let size = width as usize * height as usize;
         if image.len() < size {
             return None;
@@ -139,7 +139,7 @@ impl IndexedImage {
         Some(Self {
             width,
             height,
-            data: image[..size].into(),
+            data: if image.len() > size { image[..size].into() } else { image },
             palette,
         })
     }
@@ -166,13 +166,13 @@ impl IndexedImage {
 
     #[inline]
     pub fn get_index(&self, x: u32, y: u32) -> u8 {
-        let offset = self.width as usize * y as usize * 4 + x as usize * 4;
+        let offset = self.width as usize * y as usize + x as usize;
         self.data[offset]
     }
 
     #[inline]
     pub fn set_index(&mut self, x: u32, y: u32, index: u8) {
-        let offset = self.width as usize * y as usize * 4 + x as usize * 4;
+        let offset = self.width as usize * y as usize + x as usize;
         self.data[offset] = index;
     }
 
@@ -206,7 +206,13 @@ impl IndexedImage {
         }
     }
 
-    pub fn apply_into(&self, image: &mut RgbImage) {
+    pub fn apply_with_palette(&self, image: &mut RgbImage, palette: &Palette) {
+        for (index, pixel) in self.data.iter().cloned().zip(image.data.iter_mut()) {
+            *pixel = palette[index];
+        }
+    }
+
+    pub fn apply(&self, image: &mut RgbImage) {
         for (index, pixel) in self.data.iter().cloned().zip(image.data.iter_mut()) {
             *pixel = self.palette[index];
         }
@@ -236,6 +242,7 @@ impl From<IndexedImage> for RgbImage {
 
 #[derive(Debug, Clone)]
 pub struct CycleImage {
+    frame_palette: Palette,
     indexed_image: IndexedImage,
     rgb_image: RgbImage,
     cycles: Box<[Cycle]>,
@@ -245,6 +252,7 @@ impl CycleImage {
     pub fn new(indexed_image: IndexedImage, cycles: Box<[Cycle]>) -> Self {
         let rgb_image = indexed_image.to_rgb_image();
         Self {
+            frame_palette: indexed_image.palette.clone(),
             indexed_image,
             rgb_image,
             cycles,
@@ -297,17 +305,24 @@ impl CycleImage {
     }
 
     #[inline]
-    pub fn advance(&mut self) {
-        self.indexed_image.palette_mut().apply_cycles(&self.cycles);
-        self.indexed_image.apply_into(&mut self.rgb_image);
+    pub fn next_frame(&mut self, now: f64) {
+        self.frame_palette.clone_from(&self.indexed_image.palette);
+        self.frame_palette.apply_cycles(&self.cycles, now);
+        self.indexed_image.apply_with_palette(&mut self.rgb_image, &self.frame_palette);
     }
 
     #[inline]
     pub fn get_rect(&self, x: u32, y: u32, width: u32, height: u32) -> Self {
         Self {
+            frame_palette: self.frame_palette.clone(),
             indexed_image: self.indexed_image.get_rect(x, y, width, height),
             rgb_image: self.rgb_image.get_rect(x, y, width, height),
             cycles: self.cycles.clone(),
         }
+    }
+
+    pub fn swap_image_buffer(&mut self, image: &mut RgbImage) {
+        std::mem::swap(&mut self.rgb_image, image);
+        // TODO: self.rgb_image.resize(self.indexed_image.width(), self.indexed_image.height());
     }
 }

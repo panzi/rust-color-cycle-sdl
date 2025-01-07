@@ -1,4 +1,4 @@
-use std::{fmt::Display, ops::{Index, IndexMut}};
+use std::{fmt::Display, ops::{Index, IndexMut}, time::Instant};
 
 use crate::color::Rgb;
 
@@ -46,32 +46,38 @@ impl Palette {
     // TODO: blend mode
 
     pub fn rotate_right(&mut self, low: u8, high: u8, distance: u32) {
-        let span = high - low;
-        let distance = distance % span as u32; // do I need this?
-        let slice = &mut self.0[low as usize..high as usize];
+        let slice = &mut self.0[low as usize..high as usize + 1];
         slice.rotate_right(distance as usize);
     }
 
     pub fn rotate_left(&mut self, low: u8, high: u8, distance: u32) {
-        let span = high - low;
-        let distance = distance % span as u32; // do I need this?
-        let slice = &mut self.0[low as usize..high as usize];
+        let slice = &mut self.0[low as usize..high as usize + 1];
         slice.rotate_left(distance as usize);
     }
 
-    pub fn apply_cycle(&mut self, cycle: &Cycle) {
-        let distance = cycle.rate() / LBM_CYCLE_RATE_DIVISOR;
-        if cycle.reverse() {
-            self.rotate_left(cycle.low(), cycle.high(), distance);
-        } else {
-            self.rotate_right(cycle.low(), cycle.high(), distance);
+    pub fn apply_cycle(&mut self, cycle: &Cycle, now: f64) {
+        let low = cycle.low();
+        let high = cycle.high();
+        if high > low {
+            let size = (high - low + 1) as f64;
+            let rate = cycle.rate() as f64 / LBM_CYCLE_RATE_DIVISOR as f64;
+            let distance = ((rate * now) % size) as u32;
+            //eprintln!("low: {low}, high: {high}, rate: {rate}, size: {size}, rate * now: {}, distance: {distance}", rate * now);
+            //let distance = 1;
+            if cycle.reverse() {
+                self.rotate_left(cycle.low(), cycle.high(), distance);
+            } else {
+                self.rotate_right(cycle.low(), cycle.high(), distance);
+            }
         }
     }
 
-    pub fn apply_cycles(&mut self, cycles: &[Cycle]) {
+    pub fn apply_cycles(&mut self, cycles: &[Cycle], now: f64) {
+        //eprintln!("now: {now}");
         for cycle in cycles {
-            self.apply_cycle(cycle);
+            self.apply_cycle(cycle, now);
         }
+        //eprintln!();
     }
 }
 
@@ -101,7 +107,7 @@ impl Cycle {
 
     #[inline]
     pub fn high(&self) -> u8 {
-        self.low
+        self.high
     }
 
     #[inline]
