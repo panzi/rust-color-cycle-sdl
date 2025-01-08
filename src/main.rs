@@ -140,6 +140,12 @@ fn nb_read_byte(mut reader: impl Read) -> std::io::Result<Option<u8>> {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub struct Args {
+    #[arg(short, long, default_value_t = 24, value_parser = clap::value_parser!(u32).range(1..10_000))]
+    pub fps: u32,
+
+    #[arg(short, long, default_value_t = false)]
+    pub blend: bool,
+
     #[arg()]
     pub path: OsString,
 }
@@ -156,7 +162,7 @@ fn main() -> std::io::Result<()> {
     let mut stdin = std::io::stdin().lock();
     let mut stdout = std::io::stdout().lock();
 
-    let frame_duration = Duration::from_secs_f64(1.0 / 12.0);
+    let frame_duration = Duration::from_secs_f64(1.0 / (args.fps as f64));
     let mut linebuf = String::new();
 
     let img_width = cycle_image.width();
@@ -176,7 +182,7 @@ fn main() -> std::io::Result<()> {
         img_height.min(term_height));
 
     // TODO: resize prev_frame on window size or x/y pos change
-    let mut prev_frame = RgbImage::new(term_width, term_height);
+    let mut prev_frame = RgbImage::new(viewport.width(), viewport.height());
 
     // initial blank screen
     // simple_image_to_ansi_into(&prev_frame, &mut linebuf);
@@ -366,6 +372,7 @@ fn main() -> std::io::Result<()> {
         // render frame
         if old_x != x || old_y != y || old_term_width != term_width || old_term_height != term_height {
             // let old_viewport_width = viewport.width();
+            // let old_viewport_height = viewport.height();
 
             viewport.get_rect_from(x, y, term_width, term_height, &cycle_image);
 
@@ -391,7 +398,7 @@ fn main() -> std::io::Result<()> {
             }
         }
 
-        viewport.render_frame((frame_start_ts - loop_start_ts).as_secs_f64());
+        viewport.render_frame((frame_start_ts - loop_start_ts).as_secs_f64(), args.blend);
 
         // let _ = write!(stdout, ".");
         // let _ = stdout.flush();

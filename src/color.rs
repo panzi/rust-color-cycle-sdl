@@ -51,3 +51,15 @@ impl Rgb {
         self.0[2]
     }
 }
+
+pub fn blend(c1: Rgb, c2: Rgb, mid: f64) -> Rgb {
+    let Rgb([r1, g1, b1]) = c1;
+    let Rgb([r2, g2, b2]) = c2;
+
+    let inv_mid = 1.0 - mid;
+    let r = (r1 as f64 * inv_mid + r2 as f64 * mid).round();
+    let g = (g1 as f64 * inv_mid + g2 as f64 * mid).round();
+    let b = (b1 as f64 * inv_mid + b2 as f64 * mid).round();
+
+    Rgb([r as u8, g as u8, b as u8])
+}

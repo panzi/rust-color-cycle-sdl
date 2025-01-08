@@ -389,9 +389,10 @@ impl CycleImage {
     }
 
     #[inline]
-    pub fn render_frame(&mut self, now: f64) {
-        self.frame_palette.clone_from(&self.indexed_image.palette);
-        self.frame_palette.apply_cycles(&self.cycles, now);
+    pub fn render_frame(&mut self, now: f64, blend: bool) {
+        self.frame_palette.apply_cycles_from(&self.indexed_image.palette, &self.cycles, now, blend);
+        // self.frame_palette.clone_from(&self.indexed_image.palette);
+        // self.frame_palette.apply_cycles(&self.cycles, now);
         self.indexed_image.apply_with_palette(&mut self.rgb_image, &self.frame_palette);
     }
 
