@@ -4,12 +4,15 @@ pub mod image;
 pub mod palette;
 pub mod read;
 
+use std::ffi::OsString;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
-use std::path::Path;
 use std::mem::MaybeUninit;
 
+use clap::Parser;
 use image::{CycleImage, RgbImage};
 use image_to_ansi::image_to_ansi_into;
 use libc;
@@ -113,44 +116,38 @@ fn nb_read_avail(mut reader: impl Read, buf: &mut [u8]) -> std::io::Result<usize
 }
 */
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ReadByte {
-    Quit,
-    NoData,
-    Byte(u8),
-}
-
-fn nb_read_byte(mut reader: impl Read) -> std::io::Result<ReadByte> {
+fn nb_read_byte(mut reader: impl Read) -> std::io::Result<Option<u8>> {
     let mut buf = [0u8];
-    match reader.read(&mut buf) {
-        Err(err) => {
-            match err.kind() {
-                std::io::ErrorKind::WouldBlock => Ok(ReadByte::NoData),
-                std::io::ErrorKind::Other if err.raw_os_error() == Some(libc::EAGAIN) => Ok(ReadByte::NoData),
-                std::io::ErrorKind::Interrupted => Ok(ReadByte::Quit),
-                _ => Err(err)
+    loop {
+        return match reader.read(&mut buf) {
+            Err(err) => {
+                match err.kind() {
+                    std::io::ErrorKind::WouldBlock => Ok(None),
+                    std::io::ErrorKind::Other if err.raw_os_error() == Some(libc::EAGAIN) => Ok(None),
+                    std::io::ErrorKind::Interrupted => continue,
+                    _ => Err(err)
+                }
             }
-        }
-        Ok(count) => if count == 0 {
-            Ok(ReadByte::NoData)
-        } else {
-            Ok(ReadByte::Byte(buf[0]))
-        }
+            Ok(count) => if count == 0 {
+                Ok(None)
+            } else {
+                Ok(Some(buf[0]))
+            }
+        };
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+pub struct Args {
+    #[arg()]
+    pub path: OsString,
+}
+
 fn main() -> std::io::Result<()> {
-    // fcntl(0, F_SETFL, fcntl(0, GETFL) | O_NONBLOCK)
-    // see also: https://web.archive.org/web/20170407122137/http://cc.byexamples.com/2007/04/08/non-blocking-user-input-in-loop-without-ncurses/
-    // see also: https://stackoverflow.com/questions/717572/how-do-you-do-non-blocking-console-i-o-on-linux-in-c
+    let args = Args::parse();
 
-    let mut args = std::env::args_os();
-    let _ = args.next();
-    let Some(filename) = args.next() else {
-        return Err(std::io::Error::from_raw_os_error(libc::EINVAL));
-    };
-
-    let file = File::open(Path::new(&filename))?;
+    let file = File::open(args.path)?;
     let reader = BufReader::new(file);
 
     let cycle_image: CycleImage = serde_json::from_reader(reader)?;
@@ -188,11 +185,20 @@ fn main() -> std::io::Result<()> {
 
     let mut x = 0;
     let mut y = 0;
-    let program_start_ts = Instant::now();
     let mut old_term_width = term_width;
     let mut old_term_height = term_height;
 
-    loop {
+    let running = Arc::new(AtomicBool::new(true));
+
+    {
+        let running = running.clone();
+        let _ = ctrlc::set_handler(move || {
+            running.store(false, Ordering::Relaxed);
+        });
+    }
+
+    let loop_start_ts = Instant::now();
+    while running.load(Ordering::Relaxed) {
         let frame_start_ts = Instant::now();
 
         // process input
@@ -220,43 +226,40 @@ fn main() -> std::io::Result<()> {
 
         loop {
             match nb_read_byte(&mut stdin)? {
-                ReadByte::Quit => return Ok(()),
-                ReadByte::NoData => break,
-                ReadByte::Byte(b'q') => return Ok(()),
-                ReadByte::Byte(0x1b) => {
+                None => break,
+                Some(b'q') => return Ok(()),
+                Some(0x1b) => {
                     match nb_read_byte(&mut stdin)? {
-                        ReadByte::Quit => return Ok(()),
-                        ReadByte::NoData => return Ok(()),
-                        ReadByte::Byte(0x1b) => return Ok(()),
-                        ReadByte::Byte(b'[') => {
+                        None => return Ok(()),
+                        Some(0x1b) => return Ok(()),
+                        Some(b'[') => {
                             match nb_read_byte(&mut stdin)? {
-                                ReadByte::Quit => return Ok(()),
-                                ReadByte::NoData => break,
-                                ReadByte::Byte(b'A') => {
+                                None => break,
+                                Some(b'A') => {
                                     // Up
                                     if img_height > term_height && y > 0 {
                                         y -= 1;
                                     }
                                 }
-                                ReadByte::Byte(b'B') => {
+                                Some(b'B') => {
                                     // Down
                                     if img_height > term_height && y < (img_height - term_height) {
                                         y += 1;
                                     }
                                 }
-                                ReadByte::Byte(b'C') => {
+                                Some(b'C') => {
                                     // Right
                                     if img_width > term_width && x < (img_width - term_width) {
                                         x += 1;
                                     }
                                 }
-                                ReadByte::Byte(b'D') => {
+                                Some(b'D') => {
                                     // Left
                                     if img_width > term_width && x > 0 {
                                         x -= 1;
                                     }
                                 }
-                                ReadByte::Byte(b'H') => {
+                                Some(b'H') => {
                                     // Home
                                     if img_width > term_width {
                                         x = 0;
@@ -265,7 +268,7 @@ fn main() -> std::io::Result<()> {
                                         y = 0;
                                     }
                                 }
-                                ReadByte::Byte(b'F') => {
+                                Some(b'F') => {
                                     // End
                                     if img_width > term_width {
                                         x = img_width - term_width;
@@ -274,37 +277,34 @@ fn main() -> std::io::Result<()> {
                                         y = img_height - term_height;
                                     }
                                 }
-                                ReadByte::Byte(b'1') => {
+                                Some(b'1') => {
                                     match nb_read_byte(&mut stdin)? {
-                                        ReadByte::Quit => return Ok(()),
-                                        ReadByte::NoData => break,
-                                        ReadByte::Byte(b';') => {
+                                        None => break,
+                                        Some(b';') => {
                                             match nb_read_byte(&mut stdin)? {
-                                                ReadByte::Quit => return Ok(()),
-                                                ReadByte::NoData => break,
-                                                ReadByte::Byte(b'5') => {
+                                                None => break,
+                                                Some(b'5') => {
                                                     match nb_read_byte(&mut stdin)? {
-                                                        ReadByte::Quit => return Ok(()),
-                                                        ReadByte::NoData => break,
-                                                        ReadByte::Byte(b'A') => {
+                                                        None => break,
+                                                        Some(b'A') => {
                                                             // Ctrl+Up
                                                             if img_height > term_height {
                                                                 y = 0;
                                                             }
                                                         }
-                                                        ReadByte::Byte(b'B') => {
+                                                        Some(b'B') => {
                                                             // Ctrl+Down
                                                             if img_height > term_height {
                                                                 y = img_height - term_height;
                                                             }
                                                         }
-                                                        ReadByte::Byte(b'C') => {
+                                                        Some(b'C') => {
                                                             // Ctrl+Right
                                                             if img_width > term_width {
                                                                 x = img_width - term_width;
                                                             }
                                                         }
-                                                        ReadByte::Byte(b'D') => {
+                                                        Some(b'D') => {
                                                             // Ctrl+Left
                                                             if img_width > term_width {
                                                                 x = 0;
@@ -319,11 +319,10 @@ fn main() -> std::io::Result<()> {
                                         _ => break,
                                     }
                                 }
-                                ReadByte::Byte(b'5') => {
+                                Some(b'5') => {
                                     match nb_read_byte(&mut stdin)? {
-                                        ReadByte::Quit => return Ok(()),
-                                        ReadByte::NoData => break,
-                                        ReadByte::Byte(b'~') => {
+                                        None => break,
+                                        Some(b'~') => {
                                             // Page Up
                                             if img_height > term_height {
                                                 let half = term_height / 2;
@@ -337,11 +336,10 @@ fn main() -> std::io::Result<()> {
                                         _ => {}
                                     }
                                 }
-                                ReadByte::Byte(b'6') => {
+                                Some(b'6') => {
                                     match nb_read_byte(&mut stdin)? {
-                                        ReadByte::Quit => return Ok(()),
-                                        ReadByte::NoData => break,
-                                        ReadByte::Byte(b'~') => {
+                                        None => break,
+                                        Some(b'~') => {
                                             // Page Down
                                             if img_height > term_height {
                                                 let half = term_height / 2;
@@ -393,7 +391,7 @@ fn main() -> std::io::Result<()> {
             }
         }
 
-        viewport.render_frame((frame_start_ts - program_start_ts).as_secs_f64());
+        viewport.render_frame((frame_start_ts - loop_start_ts).as_secs_f64());
 
         // let _ = write!(stdout, ".");
         // let _ = stdout.flush();
