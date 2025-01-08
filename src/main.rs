@@ -33,7 +33,6 @@ impl NBTerm {
 
             // turn off canonical mode
             ttystate.c_lflag &= !(libc::ICANON | libc::ECHO);
-            //ttystate.c_lflag &= !libc::ICANON;
 
             // minimum of number input read.
             ttystate.c_cc[libc::VMIN] = 0;
@@ -96,25 +95,6 @@ fn interruptable_sleep(duration: Duration) -> bool {
         return true;
     }
 }
-
-/*
-fn nb_read_avail(mut reader: impl Read, buf: &mut [u8]) -> std::io::Result<usize> {
-    match reader.read(buf) {
-        Err(err) => {
-            match err.kind() {
-                std::io::ErrorKind::WouldBlock => Ok(0),
-                std::io::ErrorKind::Other if err.raw_os_error() == Some(libc::EAGAIN) => Ok(0),
-                std::io::ErrorKind::Interrupted => {
-                    buf[0] = b'q';
-                    return Ok(1);
-                },
-                _ => Err(err)
-            }
-        }
-        value => value
-    }
-}
-*/
 
 fn nb_read_byte(mut reader: impl Read) -> std::io::Result<Option<u8>> {
     let mut buf = [0u8];
