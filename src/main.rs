@@ -158,7 +158,7 @@ fn main() -> std::io::Result<()> {
 
     let cycle_image: CycleImage = serde_json::from_reader(reader)?;
 
-    let nbterm = NBTerm::new()?;
+    let _nbterm = NBTerm::new()?;
     let mut stdin = std::io::stdin().lock();
     let mut stdout = std::io::stdout().lock();
 
@@ -181,11 +181,9 @@ fn main() -> std::io::Result<()> {
         img_width.min(term_width),
         img_height.min(term_height));
 
-    // TODO: resize prev_frame on window size or x/y pos change
     let mut prev_frame = RgbImage::new(viewport.width(), viewport.height());
 
     // initial blank screen
-    // simple_image_to_ansi_into(&prev_frame, &mut linebuf);
     let _ = write!(stdout, "\x1B[1;1H\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m\x1B[2J");
     let _ = stdout.flush();
 
@@ -400,14 +398,10 @@ fn main() -> std::io::Result<()> {
 
         viewport.render_frame((frame_start_ts - loop_start_ts).as_secs_f64(), args.blend);
 
-        // let _ = write!(stdout, ".");
-        // let _ = stdout.flush();
         let full_width = viewport.width() >= term_width;
         image_to_ansi_into(&prev_frame, viewport.rgb_image(), full_width, &mut linebuf);
-        //simple_image_to_ansi_into(viewport.rgb_image(), &mut linebuf);
 
         viewport.swap_image_buffer(&mut prev_frame);
-        //eprintln!("{}", linebuf);
 
         let _ = write!(stdout, "\x1B[1;1H{linebuf}");
         let _ = stdout.flush();
@@ -420,11 +414,7 @@ fn main() -> std::io::Result<()> {
 
         old_term_width  = term_width;
         old_term_height = term_height;
-
-        //break;
     }
-
-    drop(nbterm);
 
     Ok(())
 }
