@@ -17,6 +17,8 @@ use image::{CycleImage, RgbImage};
 use image_to_ansi::image_to_ansi_into;
 use libc;
 
+const MAX_FPS: u32 = 10_000;
+
 pub struct NBTerm;
 
 impl NBTerm {
@@ -120,7 +122,7 @@ fn nb_read_byte(mut reader: impl Read) -> std::io::Result<Option<u8>> {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub struct Args {
-    #[arg(short, long, default_value_t = 24, value_parser = clap::value_parser!(u32).range(1..10_000))]
+    #[arg(short, long, default_value_t = 24, value_parser = clap::value_parser!(u32).range(1..MAX_FPS as i64))]
     pub fps: u32,
 
     #[arg(short, long, default_value_t = false)]
@@ -131,7 +133,7 @@ pub struct Args {
 }
 
 fn main() -> std::io::Result<()> {
-    let args = Args::parse();
+    let mut args = Args::parse();
 
     let file = File::open(args.path)?;
     let reader = BufReader::new(file);
@@ -142,7 +144,7 @@ fn main() -> std::io::Result<()> {
     let mut stdin = std::io::stdin().lock();
     let mut stdout = std::io::stdout().lock();
 
-    let frame_duration = Duration::from_secs_f64(1.0 / (args.fps as f64));
+    let mut frame_duration = Duration::from_secs_f64(1.0 / (args.fps as f64));
     let mut linebuf = String::new();
 
     let img_width = cycle_image.width();
@@ -226,6 +228,21 @@ fn main() -> std::io::Result<()> {
             match nb_read_byte(&mut stdin)? {
                 None => break,
                 Some(b'q') => return Ok(()),
+                Some(b'b') => {
+                    args.blend = !args.blend;
+                }
+                Some(b'+') => {
+                    if args.fps < MAX_FPS {
+                        args.fps += 1;
+                        frame_duration = Duration::from_secs_f64(1.0 / args.fps as f64);
+                    }
+                }
+                Some(b'-') => {
+                    if args.fps > 1 {
+                        args.fps -= 1;
+                        frame_duration = Duration::from_secs_f64(1.0 / args.fps as f64);
+                    }
+                }
                 Some(0x1b) => {
                     match nb_read_byte(&mut stdin)? {
                         None => return Ok(()),
@@ -288,30 +305,6 @@ fn main() -> std::io::Result<()> {
                                                             // Ctrl+End
                                                             if img_height > term_height {
                                                                 y = img_height - term_height;
-                                                            }
-                                                        }
-                                                        Some(b'A') => {
-                                                            // Ctrl+Up
-                                                            if img_height > term_height {
-                                                                y = 0;
-                                                            }
-                                                        }
-                                                        Some(b'B') => {
-                                                            // Ctrl+Down
-                                                            if img_height > term_height {
-                                                                y = img_height - term_height;
-                                                            }
-                                                        }
-                                                        Some(b'C') => {
-                                                            // Ctrl+Right
-                                                            if img_width > term_width {
-                                                                x = img_width - term_width;
-                                                            }
-                                                        }
-                                                        Some(b'D') => {
-                                                            // Ctrl+Left
-                                                            if img_width > term_width {
-                                                                x = 0;
                                                             }
                                                         }
                                                         _ => break,
