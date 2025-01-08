@@ -198,10 +198,10 @@ pub fn simple_image_to_ansi_into(image: &RgbImage, lines: &mut String) {
 
     lines.reserve(line_len * row_count as usize + "\x1B[0m".len());
 
-    lines.push_str("\x1B[1;1H");
-
     for line_y in 0..row_count {
-        let _ = write!(lines, "\x1B[{};0H", line_y + 1);
+        if line_y > 0 {
+            let _ = write!(lines, "\x1B[{}D\x1B[1B", width);
+        }
         let y = line_y * 2;
         if y + 1 == image.height() {
             let mut prev_color = Rgb([0, 0, 0]);
@@ -259,8 +259,7 @@ pub fn simple_image_to_ansi_into(image: &RgbImage, lines: &mut String) {
                 }
             }
         }
-
-        //lines.push_str("\x1B[0m\r\n");
     }
-    lines.push_str("\x1B[0m");
+
+    let _ = write!(lines, "\x1B[{}D\x1B[0m", width);
 }

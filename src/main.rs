@@ -156,19 +156,28 @@ fn main() -> std::io::Result<()> {
         }
     };
 
-    let mut viewport = cycle_image.get_rect(
-        0, 0,
-        img_width.min(term_width),
-        img_height.min(term_height));
-
-    let mut prev_frame = RgbImage::new(viewport.width(), viewport.height());
-
     // initial blank screen
     let _ = write!(stdout, "\x1B[1;1H\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m\x1B[2J");
     let _ = stdout.flush();
 
     let mut x = 0;
     let mut y = 0;
+
+    if img_width > term_width {
+        x = (img_width - term_width) / 2;
+    }
+
+    if img_height > term_height {
+        y = (img_height - term_height) / 2;
+    }
+
+    let mut viewport = cycle_image.get_rect(
+        x, y,
+        img_width.min(term_width),
+        img_height.min(term_height));
+
+    let mut prev_frame = RgbImage::new(viewport.width(), viewport.height());
+
     let mut old_term_width = term_width;
     let mut old_term_height = term_height;
 
@@ -196,14 +205,19 @@ fn main() -> std::io::Result<()> {
         let old_x = x;
         let old_y = y;
 
+        let mut viewport_x = 0;
+        let mut viewport_y = 0;
+
         if img_width <= term_width {
             x = 0;
+            viewport_x = (term_width - img_width) / 2;
         } else if x > img_width - term_width {
             x = img_width - term_width;
         }
 
         if img_height <= term_height {
             y = 0;
+            viewport_y = (term_height - img_height) / 2;
         } else if y > img_height - term_height {
             y = img_height - term_height;
         }
@@ -354,13 +368,11 @@ fn main() -> std::io::Result<()> {
 
             viewport.get_rect_from(x, y, term_width, term_height, &cycle_image);
 
-            if old_term_width != term_width || old_term_height != term_height {
+            //if old_term_width != term_width || old_term_height != term_height {
                 prev_frame = RgbImage::new(viewport.width(), viewport.height());
 
                 let _ = write!(stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m\x1B[2J");
-            } else {
-                // prev_frame.resize(viewport.width(), viewport.height(), Rgb([0, 0, 0]));
-
+            /*} else {
                 if term_width > old_term_width || term_height > old_term_height {
                     let _ = write!(stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m");
                     if term_width > old_term_width {
@@ -371,9 +383,9 @@ fn main() -> std::io::Result<()> {
                 }
 
                 if term_height > old_term_height {
-                    let _ = write!(stdout, "\x1B{};1H\x1B[J", old_term_height + 1);
+                    let _ = write!(stdout, "\x1B{};1H\x1B[J", (old_term_height * 2) + 1);
                 }
-            }
+            }*/
         }
 
         viewport.render_frame((frame_start_ts - loop_start_ts).as_secs_f64(), args.blend);
@@ -383,7 +395,7 @@ fn main() -> std::io::Result<()> {
 
         viewport.swap_image_buffer(&mut prev_frame);
 
-        let _ = write!(stdout, "\x1B[1;1H{linebuf}");
+        let _ = write!(stdout, "\x1B[{};{}H{linebuf}", (viewport_y / 2) + 1, viewport_x + 1);
         let _ = stdout.flush();
 
         // sleep for rest of frame
