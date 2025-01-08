@@ -119,7 +119,6 @@ dependencies = [
  "serde",
  "serde_json",
  "term_size",
- "winapi",
 ]
 
 [[package]]

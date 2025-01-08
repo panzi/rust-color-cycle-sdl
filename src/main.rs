@@ -52,28 +52,28 @@ impl NBTerm {
             }
         }
 
-        #[cfg(windows)]
-        unsafe {
-            use winapi::shared::minwindef::{DWORD, FALSE};
-
-            let handle = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_INPUT_HANDLE);
-            if handle == winapi::um::handleapi::INVALID_HANDLE_VALUE {
-                let err = std::io::Error::last_os_error();
-                return Err(err);
-            }
-
-            let mut mode: DWORD = 0;
-
-            if winapi::um::consoleapi::GetConsoleMode(handle, &mut mode as *mut DWORD) == FALSE {
-                let err = std::io::Error::last_os_error();
-                return Err(err);
-            }
-
-            if winapi::um::consoleapi::SetConsoleMode(handle, mode & !(winapi::um::wincon::ENABLE_ECHO_INPUT | winapi::um::wincon::ENABLE_LINE_INPUT)) == FALSE {
-                let err = std::io::Error::last_os_error();
-                return Err(err);
-            }
-        }
+//        #[cfg(windows)]
+//        unsafe {
+//            use winapi::shared::minwindef::{DWORD, FALSE};
+//
+//            let handle = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_INPUT_HANDLE);
+//            if handle == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+//                let err = std::io::Error::last_os_error();
+//                return Err(err);
+//            }
+//
+//            let mut mode: DWORD = 0;
+//
+//            if winapi::um::consoleapi::GetConsoleMode(handle, &mut mode as *mut DWORD) == FALSE {
+//                let err = std::io::Error::last_os_error();
+//                return Err(err);
+//            }
+//
+//            if winapi::um::consoleapi::SetConsoleMode(handle, mode & !(winapi::um::wincon::ENABLE_ECHO_INPUT | winapi::um::wincon::ENABLE_LINE_INPUT)) == FALSE {
+//                let err = std::io::Error::last_os_error();
+//                return Err(err);
+//            }
+//        }
 
         // CSI ?  7 l     No Auto-Wrap Mode (DECAWM), VT100.
         // CSI ? 25 l     Hide cursor (DECTCEM), VT220
@@ -100,18 +100,18 @@ impl Drop for NBTerm {
             }
         }
 
-        #[cfg(windows)]
-        unsafe {
-            use winapi::shared::minwindef::{DWORD, FALSE};
-            let handle = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_INPUT_HANDLE);
-            if handle != winapi::um::handleapi::INVALID_HANDLE_VALUE {
-                let mut mode: DWORD = 0;
-
-                if winapi::um::consoleapi::GetConsoleMode(handle, &mut mode as *mut DWORD) != FALSE {
-                    winapi::um::consoleapi::SetConsoleMode(handle, mode | winapi::um::wincon::ENABLE_ECHO_INPUT | winapi::um::wincon::ENABLE_LINE_INPUT);
-                }
-            }
-        }
+//        #[cfg(windows)]
+//        unsafe {
+//            use winapi::shared::minwindef::{DWORD, FALSE};
+//            let handle = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_INPUT_HANDLE);
+//            if handle != winapi::um::handleapi::INVALID_HANDLE_VALUE {
+//                let mut mode: DWORD = 0;
+//
+//                if winapi::um::consoleapi::GetConsoleMode(handle, &mut mode as *mut DWORD) != FALSE {
+//                    winapi::um::consoleapi::SetConsoleMode(handle, mode | winapi::um::wincon::ENABLE_ECHO_INPUT | winapi::um::wincon::ENABLE_LINE_INPUT);
+//                }
+//            }
+//        }
 
         // CSI 0 m        Reset or normal, all attributes become turned off
         // CSI ?  7 h     Auto-Wrap Mode (DECAWM), VT100
@@ -140,6 +140,25 @@ fn interruptable_sleep(duration: Duration) -> bool {
     }
 }
 
+#[cfg(windows)]
+extern {
+    fn _getch() -> core::ffi::c_char;
+    fn _kbhit() -> core::ffi::c_int;
+}
+
+#[cfg(windows)]
+fn nb_read_byte(mut _reader: impl Read) -> std::io::Result<Option<u8>> {
+    unsafe {
+        if _kbhit() == 0 {
+            return Ok(None);
+        }
+
+        let ch = _getch();
+        Ok(Some(ch as u8))
+    }
+}
+
+#[cfg(not(windows))]
 fn nb_read_byte(mut reader: impl Read) -> std::io::Result<Option<u8>> {
     let mut buf = [0u8];
     loop {
@@ -269,7 +288,6 @@ fn main() -> std::io::Result<()> {
             y = img_height - term_height;
         }
 
-        #[cfg(not(windows))]
         loop {
             // TODO: Windows support, maybe with ReadConsoleInput()?
             match nb_read_byte(&mut stdin)? {
