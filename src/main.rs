@@ -10,11 +10,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
+
+#[cfg(not(windows))]
 use std::mem::MaybeUninit;
 
 use clap::Parser;
 use image::{CycleImage, RgbImage};
 use image_to_ansi::image_to_ansi_into;
+
+#[cfg(not(windows))]
 use libc;
 
 const MAX_FPS: u32 = 10_000;
@@ -23,6 +27,7 @@ pub struct NBTerm;
 
 impl NBTerm {
     pub fn new() -> std::io::Result<Self> {
+        #[cfg(not(windows))]
         unsafe {
             let mut ttystate = MaybeUninit::<libc::termios>::zeroed();
             let res = libc::tcgetattr(libc::STDIN_FILENO, ttystate.as_mut_ptr());
@@ -47,6 +52,29 @@ impl NBTerm {
             }
         }
 
+        #[cfg(windows)]
+        unsafe {
+            use winapi::shared::minwindef::{DWORD, FALSE};
+
+            let handle = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_INPUT_HANDLE);
+            if handle == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+                let err = std::io::Error::last_os_error();
+                return Err(err);
+            }
+
+            let mut mode: DWORD = 0;
+
+            if winapi::um::consoleapi::GetConsoleMode(handle, &mut mode as *mut DWORD) == FALSE {
+                let err = std::io::Error::last_os_error();
+                return Err(err);
+            }
+
+            if winapi::um::consoleapi::SetConsoleMode(handle, mode & !(winapi::um::wincon::ENABLE_ECHO_INPUT | winapi::um::wincon::ENABLE_LINE_INPUT)) == FALSE {
+                let err = std::io::Error::last_os_error();
+                return Err(err);
+            }
+        }
+
         // CSI ?  7 l     No Auto-Wrap Mode (DECAWM), VT100.
         // CSI ? 25 l     Hide cursor (DECTCEM), VT220
         // CSI 2 J        Clear entire screen
@@ -58,6 +86,7 @@ impl NBTerm {
 
 impl Drop for NBTerm {
     fn drop(&mut self) {
+        #[cfg(not(windows))]
         unsafe {
             let mut ttystate = MaybeUninit::<libc::termios>::zeroed();
             let res = libc::tcgetattr(libc::STDIN_FILENO, ttystate.as_mut_ptr());
@@ -71,6 +100,19 @@ impl Drop for NBTerm {
             }
         }
 
+        #[cfg(windows)]
+        unsafe {
+            use winapi::shared::minwindef::{DWORD, FALSE};
+            let handle = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_INPUT_HANDLE);
+            if handle != winapi::um::handleapi::INVALID_HANDLE_VALUE {
+                let mut mode: DWORD = 0;
+
+                if winapi::um::consoleapi::GetConsoleMode(handle, &mut mode as *mut DWORD) != FALSE {
+                    winapi::um::consoleapi::SetConsoleMode(handle, mode | winapi::um::wincon::ENABLE_ECHO_INPUT | winapi::um::wincon::ENABLE_LINE_INPUT);
+                }
+            }
+        }
+
         // CSI 0 m        Reset or normal, all attributes become turned off
         // CSI ?  7 h     Auto-Wrap Mode (DECAWM), VT100
         // CSI ? 25 h     Show cursor (DECTCEM), VT220
@@ -79,7 +121,7 @@ impl Drop for NBTerm {
 }
 
 fn interruptable_sleep(duration: Duration) -> bool {
-    #[cfg(target_family = "unix")]
+    #[cfg(unix)]
     {
         let nanos = duration.as_nanos();
         let sec = nanos / 1_000_000_000u128;
@@ -91,7 +133,7 @@ fn interruptable_sleep(duration: Duration) -> bool {
         return ret == 0;
     }
 
-    #[cfg(not(target_family = "unix"))]
+    #[cfg(not(unix))]
     {
         std::thread::sleep(duration);
         return true;
@@ -105,7 +147,10 @@ fn nb_read_byte(mut reader: impl Read) -> std::io::Result<Option<u8>> {
             Err(err) => {
                 match err.kind() {
                     std::io::ErrorKind::WouldBlock => Ok(None),
+
+                    #[cfg(not(windows))]
                     std::io::ErrorKind::Other if err.raw_os_error() == Some(libc::EAGAIN) => Ok(None),
+
                     std::io::ErrorKind::Interrupted => continue,
                     _ => Err(err)
                 }
@@ -224,7 +269,9 @@ fn main() -> std::io::Result<()> {
             y = img_height - term_height;
         }
 
+        #[cfg(not(windows))]
         loop {
+            // TODO: Windows support, maybe with ReadConsoleInput()?
             match nb_read_byte(&mut stdin)? {
                 None => break,
                 Some(b'q') => return Ok(()),
