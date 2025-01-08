@@ -10,7 +10,6 @@ use std::io::{BufReader, Read, Write};
 use std::path::Path;
 use std::mem::MaybeUninit;
 
-use color::Rgb;
 use image::{CycleImage, RgbImage};
 use image_to_ansi::image_to_ansi_into;
 use libc;
@@ -227,7 +226,8 @@ fn main() -> std::io::Result<()> {
                 ReadByte::Byte(0x1b) => {
                     match nb_read_byte(&mut stdin)? {
                         ReadByte::Quit => return Ok(()),
-                        ReadByte::NoData => break,
+                        ReadByte::NoData => return Ok(()),
+                        ReadByte::Byte(0x1b) => return Ok(()),
                         ReadByte::Byte(b'[') => {
                             match nb_read_byte(&mut stdin)? {
                                 ReadByte::Quit => return Ok(()),
@@ -256,70 +256,73 @@ fn main() -> std::io::Result<()> {
                                         x -= 1;
                                     }
                                 }
+                                ReadByte::Byte(b'H') => {
+                                    // Home
+                                    if img_width > term_width {
+                                        x = 0;
+                                    }
+                                    if img_height > term_height {
+                                        y = 0;
+                                    }
+                                }
+                                ReadByte::Byte(b'F') => {
+                                    // End
+                                    if img_width > term_width {
+                                        x = img_width - term_width;
+                                    }
+                                    if img_height > term_height {
+                                        y = img_height - term_height;
+                                    }
+                                }
                                 ReadByte::Byte(b'1') => {
                                     match nb_read_byte(&mut stdin)? {
                                         ReadByte::Quit => return Ok(()),
                                         ReadByte::NoData => break,
-                                        ReadByte::Byte(b'~') => {
-                                            // Home
-                                            if img_width > term_width {
-                                                x = 0;
-                                            }
-                                            if img_height > term_height {
-                                                y = 0;
+                                        ReadByte::Byte(b';') => {
+                                            match nb_read_byte(&mut stdin)? {
+                                                ReadByte::Quit => return Ok(()),
+                                                ReadByte::NoData => break,
+                                                ReadByte::Byte(b'5') => {
+                                                    match nb_read_byte(&mut stdin)? {
+                                                        ReadByte::Quit => return Ok(()),
+                                                        ReadByte::NoData => break,
+                                                        ReadByte::Byte(b'A') => {
+                                                            // Ctrl+Up
+                                                            if img_height > term_height {
+                                                                y = 0;
+                                                            }
+                                                        }
+                                                        ReadByte::Byte(b'B') => {
+                                                            // Ctrl+Down
+                                                            if img_height > term_height {
+                                                                y = img_height - term_height;
+                                                            }
+                                                        }
+                                                        ReadByte::Byte(b'C') => {
+                                                            // Ctrl+Right
+                                                            if img_width > term_width {
+                                                                x = img_width - term_width;
+                                                            }
+                                                        }
+                                                        ReadByte::Byte(b'D') => {
+                                                            // Ctrl+Left
+                                                            if img_width > term_width {
+                                                                x = 0;
+                                                            }
+                                                        }
+                                                        _ => break,
+                                                    }
+                                                }
+                                                _ => break,
                                             }
                                         }
-                                        _ => {}
-                                    }
-                                }
-                                ReadByte::Byte(b'4') => {
-                                    match nb_read_byte(&mut stdin)? {
-                                        ReadByte::Quit => return Ok(()),
-                                        ReadByte::NoData => break,
-                                        ReadByte::Byte(b'~') => {
-                                            // End
-                                            if img_width > term_width {
-                                                x = img_width - term_width;
-                                            }
-                                            if img_height > term_height {
-                                                y = img_height - term_height;
-                                            }
-                                        }
-                                        _ => {}
+                                        _ => break,
                                     }
                                 }
                                 ReadByte::Byte(b'5') => {
                                     match nb_read_byte(&mut stdin)? {
                                         ReadByte::Quit => return Ok(()),
                                         ReadByte::NoData => break,
-                                        ReadByte::Byte(b'A') => {
-                                            // Ctrl+Up
-                                            // XXX
-                                            if img_height > term_height {
-                                                y = 0;
-                                            }
-                                        }
-                                        ReadByte::Byte(b'B') => {
-                                            // Ctrl+Down
-                                            // XXX
-                                            if img_height > term_height {
-                                                y = img_height - term_height;
-                                            }
-                                        }
-                                        ReadByte::Byte(b'C') => {
-                                            // Ctrl+Right
-                                            // XXX
-                                            if img_width > term_width {
-                                                x = img_width - term_width;
-                                            }
-                                        }
-                                        ReadByte::Byte(b'D') => {
-                                            // Ctrl+Left
-                                            // XXX
-                                            if img_width > term_width {
-                                                x = 0;
-                                            }
-                                        }
                                         ReadByte::Byte(b'~') => {
                                             // Page Up
                                             if img_height > term_height {
