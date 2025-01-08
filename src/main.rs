@@ -262,17 +262,11 @@ fn main() -> std::io::Result<()> {
                                     if img_width > term_width {
                                         x = 0;
                                     }
-                                    if img_height > term_height {
-                                        y = 0;
-                                    }
                                 }
                                 Some(b'F') => {
                                     // End
                                     if img_width > term_width {
                                         x = img_width - term_width;
-                                    }
-                                    if img_height > term_height {
-                                        y = img_height - term_height;
                                     }
                                 }
                                 Some(b'1') => {
@@ -284,6 +278,18 @@ fn main() -> std::io::Result<()> {
                                                 Some(b'5') => {
                                                     match nb_read_byte(&mut stdin)? {
                                                         None => break,
+                                                        Some(b'H') => {
+                                                            // Ctrl+Home
+                                                            if img_height > term_height {
+                                                                y = 0;
+                                                            }
+                                                        }
+                                                        Some(b'F') => {
+                                                            // Ctrl+End
+                                                            if img_height > term_height {
+                                                                y = img_height - term_height;
+                                                            }
+                                                        }
                                                         Some(b'A') => {
                                                             // Ctrl+Up
                                                             if img_height > term_height {
@@ -331,6 +337,29 @@ fn main() -> std::io::Result<()> {
                                                 }
                                             }
                                         }
+                                        Some(b';') => {
+                                            match nb_read_byte(&mut stdin)? {
+                                                None => break,
+                                                Some(b'3') => {
+                                                    match nb_read_byte(&mut stdin)? {
+                                                        None => break,
+                                                        Some(b'~') => {
+                                                            // Alt+Page Up
+                                                            if img_width > term_width {
+                                                                let half = term_width / 2;
+                                                                if x > half {
+                                                                    x -= half;
+                                                                } else {
+                                                                    x = 0;
+                                                                }
+                                                            }
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -341,11 +370,34 @@ fn main() -> std::io::Result<()> {
                                             // Page Down
                                             if img_height > term_height {
                                                 let half = term_height / 2;
-                                                let max = img_height - term_height;
+                                                let max_y = img_height - term_height;
                                                 y += half;
-                                                if y > max {
-                                                    y = max;
+                                                if y > max_y {
+                                                    y = max_y;
                                                 }
+                                            }
+                                        }
+                                        Some(b';') => {
+                                            match nb_read_byte(&mut stdin)? {
+                                                None => break,
+                                                Some(b'3') => {
+                                                    match nb_read_byte(&mut stdin)? {
+                                                        None => break,
+                                                        Some(b'~') => {
+                                                            // Alt+Page Down
+                                                            if img_width > term_width {
+                                                                let half = term_width / 2;
+                                                                let max_x = img_width - term_width;
+                                                                x += half;
+                                                                if x > max_x {
+                                                                    x = max_x;
+                                                                }
+                                                            }
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                }
+                                                _ => {}
                                             }
                                         }
                                         _ => {}
