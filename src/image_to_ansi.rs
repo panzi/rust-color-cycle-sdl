@@ -50,6 +50,10 @@ fn move_cursor(curr_x: u32, curr_line_y: u32, x: u32, line_y: u32, lines: &mut S
 }
 
 pub fn image_to_ansi_into(prev_frame: &RgbImage, image: &RgbImage, full_width: bool, lines: &mut String) {
+    if prev_frame.size() != image.size() {
+        panic!("prev_frame.size() != image.size(): {:?} != {:?}", prev_frame.size(), image.size());
+    }
+
     let row_count = (image.height() + 1) / 2;
 
     lines.clear();

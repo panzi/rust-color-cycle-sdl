@@ -209,10 +209,14 @@ fn main() -> std::io::Result<()> {
 
         if img_width <= term_width {
             x = 0;
+        } else if x > img_width - term_width {
+            x = img_width - term_width;
         }
 
         if img_height <= term_height {
             y = 0;
+        } else if y > img_height - term_height {
+            y = img_height - term_height;
         }
 
         loop {
@@ -339,9 +343,8 @@ fn main() -> std::io::Result<()> {
                                             if img_height > term_height {
                                                 let half = term_height / 2;
                                                 let max = img_height - term_height;
-                                                if y < max - half {
-                                                    y += half;
-                                                } else {
+                                                y += half;
+                                                if y > max {
                                                     y = max;
                                                 }
                                             }
@@ -361,13 +364,38 @@ fn main() -> std::io::Result<()> {
 
         // render frame
         if old_x != x || old_y != y || old_term_width != term_width || old_term_height != term_height {
+            // let old_viewport_width = viewport.width();
+
             viewport.get_rect_from(x, y, term_width, term_height, &cycle_image);
-            prev_frame.resize(viewport.width(), viewport.height(), Rgb([0, 0, 0]));
+
+            if old_term_width != term_width || old_term_height != term_height {
+                prev_frame = RgbImage::new(viewport.width(), viewport.height());
+
+                let _ = write!(stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m\x1B[2J");
+            } else {
+                // prev_frame.resize(viewport.width(), viewport.height(), Rgb([0, 0, 0]));
+
+                if term_width > old_term_width || term_height > old_term_height {
+                    let _ = write!(stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m");
+                    if term_width > old_term_width {
+                        for row in 0..old_term_height {
+                            let _ = write!(stdout, "\x1B[{};{}H\x1B[K", row + 1, old_term_width + 1);
+                        }
+                    }
+                }
+
+                if term_height > old_term_height {
+                    let _ = write!(stdout, "\x1B{};1H\x1B[J", old_term_height + 1);
+                }
+            }
         }
 
-        // print!(".");
+        viewport.render_frame((frame_start_ts - program_start_ts).as_secs_f64());
+
+        // let _ = write!(stdout, ".");
         // let _ = stdout.flush();
-        image_to_ansi_into(&prev_frame, viewport.rgb_image(), true, &mut linebuf);
+        let full_width = viewport.width() >= term_width;
+        image_to_ansi_into(&prev_frame, viewport.rgb_image(), full_width, &mut linebuf);
         //simple_image_to_ansi_into(viewport.rgb_image(), &mut linebuf);
 
         viewport.swap_image_buffer(&mut prev_frame);
@@ -375,8 +403,6 @@ fn main() -> std::io::Result<()> {
 
         let _ = write!(stdout, "\x1B[1;1H{linebuf}");
         let _ = stdout.flush();
-
-        viewport.next_frame((frame_start_ts - program_start_ts).as_secs_f64());
 
         // sleep for rest of frame
         let elapsed = frame_start_ts.elapsed();
