@@ -363,29 +363,13 @@ fn main() -> std::io::Result<()> {
 
         // render frame
         if old_x != x || old_y != y || old_term_width != term_width || old_term_height != term_height {
-            // let old_viewport_width = viewport.width();
-            // let old_viewport_height = viewport.height();
-
             viewport.get_rect_from(x, y, term_width, term_height, &cycle_image);
 
-            //if old_term_width != term_width || old_term_height != term_height {
+            if old_term_width != term_width || old_term_height != term_height {
                 prev_frame = RgbImage::new(viewport.width(), viewport.height());
 
                 let _ = write!(stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m\x1B[2J");
-            /*} else {
-                if term_width > old_term_width || term_height > old_term_height {
-                    let _ = write!(stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m");
-                    if term_width > old_term_width {
-                        for row in 0..old_term_height {
-                            let _ = write!(stdout, "\x1B[{};{}H\x1B[K", row + 1, old_term_width + 1);
-                        }
-                    }
-                }
-
-                if term_height > old_term_height {
-                    let _ = write!(stdout, "\x1B{};1H\x1B[J", (old_term_height * 2) + 1);
-                }
-            }*/
+            }
         }
 
         viewport.render_frame((frame_start_ts - loop_start_ts).as_secs_f64(), args.blend);
