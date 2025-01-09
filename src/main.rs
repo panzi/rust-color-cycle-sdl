@@ -16,7 +16,7 @@ use std::mem::MaybeUninit;
 
 use clap::Parser;
 use image::{CycleImage, RgbImage};
-use image_to_ansi::image_to_ansi_into;
+use image_to_ansi::{image_to_ansi_into, simple_image_to_ansi_into};
 
 #[cfg(not(windows))]
 use libc;
@@ -186,12 +186,26 @@ fn nb_read_byte(mut reader: impl Read) -> std::io::Result<Option<u8>> {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub struct Args {
+    /// Frames per second.
+    /// 
+    /// Attempt to render in this number of frames per second.
+    /// Actual FPS might be lower.
     #[arg(short, long, default_value_t = 24, value_parser = clap::value_parser!(u32).range(1..MAX_FPS as i64))]
     pub fps: u32,
 
+    /// Enable blend mode.
+    /// 
+    /// This blends the animated color palette for smoother display.
     #[arg(short, long, default_value_t = false)]
     pub blend: bool,
 
+    /// Enable on screen display.
+    /// 
+    /// Display messages when changing things like blend mode or FPS.{n}
+    #[arg(short, long, default_value_t = false)]
+    pub osd: bool,
+
+    /// Path to a Canvas Cycle JSON file.
     #[arg()]
     pub path: OsString,
 }
@@ -256,7 +270,13 @@ fn main() -> std::io::Result<()> {
         });
     }
 
+    let mut message = String::new();
+    let mut message_shown = false;
+    let message_display_duration = Duration::from_secs(3);
+
     let loop_start_ts = Instant::now();
+    let mut message_end_ts = loop_start_ts;
+
     while running.load(Ordering::Relaxed) {
         let frame_start_ts = Instant::now();
 
@@ -288,6 +308,21 @@ fn main() -> std::io::Result<()> {
             y = img_height - term_height;
         }
 
+        let mut updated_message = false;
+        macro_rules! show_message {
+            ($($args:expr),+) => {
+                if args.osd {
+                    message_end_ts = frame_start_ts + message_display_duration;
+                    message.clear();
+                    use std::fmt::Write;
+                    message.push_str(" ");
+                    let _ = write!(&mut message, $($args),+);
+                    message.push_str(" ");
+                    updated_message = true;
+                }
+            };
+        }
+
         loop {
             // TODO: Windows support, maybe with ReadConsoleInput()?
             match nb_read_byte(&mut stdin)? {
@@ -295,17 +330,32 @@ fn main() -> std::io::Result<()> {
                 Some(b'q') => return Ok(()),
                 Some(b'b') => {
                     args.blend = !args.blend;
+
+                    show_message!("Blend Mode: {}", if args.blend { "Enabled" } else { "Disabled" });
+                }
+                Some(b'o') => {
+                    if args.osd {
+                        show_message!("OSD: Disabled");
+                        args.osd = false;
+                    } else {
+                        args.osd = true;
+                        show_message!("OSD: Enabled");
+                    }
                 }
                 Some(b'+') => {
                     if args.fps < MAX_FPS {
                         args.fps += 1;
                         frame_duration = Duration::from_secs_f64(1.0 / args.fps as f64);
+
+                        show_message!("FPS: {}", args.fps);
                     }
                 }
                 Some(b'-') => {
                     if args.fps > 1 {
                         args.fps -= 1;
                         frame_duration = Duration::from_secs_f64(1.0 / args.fps as f64);
+
+                        show_message!("FPS: {}", args.fps);
                     }
                 }
                 Some(0x1b) => {
@@ -472,24 +522,93 @@ fn main() -> std::io::Result<()> {
         }
 
         // render frame
+        let mut full_redraw = false;
+        let viewport_row = viewport_y / 2 + 1;
+        let viewport_column = viewport_x + 1;
         if old_x != x || old_y != y || old_term_width != term_width || old_term_height != term_height {
             viewport.get_rect_from(x, y, term_width, term_height, &cycle_image);
 
             if old_term_width != term_width || old_term_height != term_height {
                 prev_frame = RgbImage::new(viewport.width(), viewport.height());
+                full_redraw = true;
 
-                let _ = write!(stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m\x1B[2J");
+                //let _ = write!(stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m\x1B[2J");
+                if viewport.width() < term_width || viewport.height() < term_height {
+                    let _ = write!(stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m");
+
+                    if viewport_y > 0 {
+                        let _ = write!(stdout, "\x1B[{};1H\x1B[1J", viewport_row);
+                    }
+
+                    let viewport_rows = (viewport.height() + 1) / 2;
+                    let viewport_end_row = viewport_row + viewport_rows;
+                    if viewport_x > 0 {
+                        let column = viewport_column - 1;
+                        for row in viewport_row..viewport_end_row {
+                            let _ = write!(stdout, "\x1B[{};{}H\x1B[1K", row, column);
+                        }
+                    }
+
+                    if viewport_x + viewport.width() < term_width {
+                        let viewport_end_column = viewport_column + viewport.width();
+                        for row in viewport_row..viewport_end_row {
+                            let _ = write!(stdout, "\x1B[{};{}H\x1B[0K", row, viewport_end_column);
+                        }
+                    }
+
+                    if (viewport_y + viewport.height() + 1) / 2 < term_height / 2 {
+                        let _ = write!(stdout, "\x1B[{};1H\x1B[0J", viewport_end_row);
+                    }
+                }
             }
         }
 
         viewport.render_frame((frame_start_ts - loop_start_ts).as_secs_f64(), args.blend);
 
         let full_width = viewport.width() >= term_width;
-        image_to_ansi_into(&prev_frame, viewport.rgb_image(), full_width, &mut linebuf);
+        if full_redraw {
+            simple_image_to_ansi_into(viewport.rgb_image(), &mut linebuf);
+        } else {
+            image_to_ansi_into(&prev_frame, viewport.rgb_image(), full_width, &mut linebuf);
+        }
 
         viewport.swap_image_buffer(&mut prev_frame);
 
-        let _ = write!(stdout, "\x1B[{};{}H{linebuf}", (viewport_y / 2) + 1, viewport_x + 1);
+        let _ = write!(stdout, "\x1B[{};{}H{linebuf}", viewport_row, viewport_column);
+
+        old_term_width  = term_width;
+        old_term_height = term_height;
+
+        if message_end_ts >= frame_start_ts {
+            if updated_message {
+                // full redraw next frame by faking old term size of 0x0
+                old_term_width  = 0;
+                old_term_height = 0;
+            } else {
+                let msg_len = message.len();
+
+                let column = if msg_len < term_width as usize {
+                    (term_width as usize - msg_len) / 2 + 1
+                } else { 1 };
+
+                let message = if msg_len > term_width as usize {
+                    &message[..term_width as usize]
+                } else {
+                    &message
+                };
+
+                let _ = write!(stdout,
+                    "\x1B[{};{}H\x1B[38;2;255;255;255m\x1B[48;2;0;0;0m{}",
+                    term_height, column, message);
+                message_shown = true;
+            }
+        } else if message_shown {
+            // full redraw next frame by faking old term size of 0x0
+            old_term_width  = 0;
+            old_term_height = 0;
+            message_shown = false;
+        }
+
         let _ = stdout.flush();
 
         // sleep for rest of frame
@@ -497,9 +616,6 @@ fn main() -> std::io::Result<()> {
         if frame_duration > elapsed && !interruptable_sleep(frame_duration - elapsed) {
             break;
         }
-
-        old_term_width  = term_width;
-        old_term_height = term_height;
     }
 
     Ok(())

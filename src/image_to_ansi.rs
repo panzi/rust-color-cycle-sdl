@@ -194,7 +194,7 @@ pub fn simple_image_to_ansi_into(image: &RgbImage, lines: &mut String) {
     }
 
     let width = image.width();
-    let line_len = (width as usize) * "\x1B[38;2;255;255;255\x1B[48;2;255;255;255m▄".len() + "\x1B[0m".len();
+    let line_len = (width as usize) * "\x1B[38;2;255;255;255\x1B[48;2;255;255;255m▄".len() + "\x1B[1234D\x1B[1B".len();
 
     lines.reserve(line_len * row_count as usize + "\x1B[0m".len());
 
