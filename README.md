@@ -42,6 +42,9 @@ Options:
           Displas messages when changing things like blend mode or FPS.
 
 
+      --help-hotkeys
+          Show list of hotkeys
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -54,7 +57,7 @@ Options:
 | Hotkey | Description |
 | :----- | :---------- |
 | `B` | Toggle blend mode |
-| `Q` or `Esc` | Quit program |
+| `Q` or `Escape` | Quit program |
 | `O` | Toggle On Screen Display of message |
 | `+` | Increase frames per second by 1 |
 | `-` | Decrease frames per second by 1 |
