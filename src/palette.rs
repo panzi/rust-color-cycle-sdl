@@ -72,9 +72,10 @@ impl Palette {
     pub fn apply_cycle(&mut self, cycle: &Cycle, now: f64) {
         let low = cycle.low();
         let high = cycle.high();
-        if high > low {
+        let rate = cycle.rate();
+        if high > low && rate > 0 {
             let size = (high - low + 1) as f64;
-            let rate = cycle.rate() as f64 / LBM_CYCLE_RATE_DIVISOR as f64;
+            let rate = rate as f64 / LBM_CYCLE_RATE_DIVISOR as f64;
             let distance = ((rate * now) % size) as u32;
             if cycle.reverse() {
                 self.rotate_left(low, high, distance);
@@ -87,10 +88,11 @@ impl Palette {
     pub fn apply_cycle_blended(&mut self, palette: &Palette, cycle: &Cycle, now: f64) {
         let low = cycle.low();
         let high = cycle.high();
-        if high > low {
+        let rate = cycle.rate();
+        if high > low && rate > 0 {
             let size = high as u32 - low as u32 + 1;
             let fsize = size as f64;
-            let rate = cycle.rate() as f64 / LBM_CYCLE_RATE_DIVISOR as f64;
+            let rate = rate as f64 / LBM_CYCLE_RATE_DIVISOR as f64;
             let fdistance = (rate * now) % fsize;
             let distance = fdistance as u32;
             let mid = fdistance - distance as f64;

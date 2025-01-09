@@ -20,7 +20,7 @@ pub mod image;
 pub mod palette;
 pub mod read;
 
-use std::ffi::OsString;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -227,13 +227,13 @@ pub struct Args {
 
     /// Path to a Canvas Cycle JSON file.
     #[arg()]
-    pub path: OsString,
+    pub path: PathBuf,
 }
 
 fn main() -> std::io::Result<()> {
     let mut args = Args::parse();
 
-    let file = File::open(args.path)?;
+    let file = File::open(&args.path)?;
     let reader = BufReader::new(file);
 
     let cycle_image: CycleImage = serde_json::from_reader(reader)?;
@@ -290,12 +290,17 @@ fn main() -> std::io::Result<()> {
         });
     }
 
-    let mut message = String::new();
-    let mut message_shown = false;
+    let filename = args.path.file_name().map(|f| f.to_string_lossy()).unwrap_or_else(|| args.path.to_string_lossy());
+    let mut message: String = filename.into();
+    let mut message_shown = args.osd;
     let message_display_duration = Duration::from_secs(3);
 
     let loop_start_ts = Instant::now();
-    let mut message_end_ts = loop_start_ts;
+    let mut message_end_ts = if args.osd {
+        loop_start_ts + message_display_duration
+    } else {
+        loop_start_ts
+    };
 
     while running.load(Ordering::Relaxed) {
         let frame_start_ts = Instant::now();
