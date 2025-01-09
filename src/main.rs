@@ -190,7 +190,7 @@ pub struct Args {
     /// 
     /// Attempt to render in this number of frames per second.
     /// Actual FPS might be lower.
-    #[arg(short, long, default_value_t = 24, value_parser = clap::value_parser!(u32).range(1..MAX_FPS as i64))]
+    #[arg(short, long, default_value_t = 25, value_parser = clap::value_parser!(u32).range(1..MAX_FPS as i64))]
     pub fps: u32,
 
     /// Enable blend mode.
@@ -199,9 +199,9 @@ pub struct Args {
     #[arg(short, long, default_value_t = false)]
     pub blend: bool,
 
-    /// Enable on screen display.
+    /// Enable On Screen Display.
     /// 
-    /// Display messages when changing things like blend mode or FPS.{n}
+    /// Displas messages when changing things like blend mode or FPS.{n}
     #[arg(short, long, default_value_t = false)]
     pub osd: bool,
 
