@@ -18,10 +18,10 @@ by Joseph Huckaby uses.
 ## Usage
 
 ```
-Usage: color-cycle [OPTIONS] <PATH>
+Usage: color-cycle [OPTIONS] <PATH>...
 
 Arguments:
-  <PATH>
+  <PATH>...
           Path to a Canvas Cycle JSON file
 
 Options:
@@ -60,6 +60,10 @@ Options:
 | `B` | Toggle blend mode |
 | `Q` or `Escape` | Quit program |
 | `O` | Toggle On Screen Display of message |
+| `N` | Open next file |
+| `P` | Open previous file |
+| `1` to `9` | Open file by index |
+| `0` | Open last file |
 | `+` | Increase frames per second by 1 |
 | `-` | Decrease frames per second by 1 |
 | `Cursor Up` | Move view-port up by 1 pixel |

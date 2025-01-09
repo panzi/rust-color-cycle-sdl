@@ -230,11 +230,11 @@ pub struct Args {
     pub help_hotkeys: bool,
 
     /// Path to a Canvas Cycle JSON file.
-    #[arg()]
-    pub path: PathBuf,
+    #[arg(required = true)]
+    pub paths: Vec<PathBuf>,
 }
 
-fn main() -> std::io::Result<()> {
+fn main() {
     let mut args = Args::parse();
 
     if args.help_hotkeys {
@@ -244,6 +244,10 @@ Hotkeys
 B              Toggle blend mode
 Q or Esccape   Quit program
 O              Toggle On Screen Display of message
+N              Open next file
+P              Open previous file
+1 to 9         Open file by index
+0              Open last file
 +              Increase frames per second by 1
 -              Decrease frames per second by 1
 Cursor Up      Move view-port up by 1 pixel
@@ -258,15 +262,48 @@ Page Up        Move view-port up by half a screen
 Page Down      Move view-port down by half a screen
 Alt+Page Up    Move view-port left by half a screen
 Alt+Page Down  Move view-port right by half a screen");
-        return Ok(());
+        return;
     }
 
-    let file = File::open(&args.path)?;
+    let mut file_index = 0;
+
+    let res = match NBTerm::new() {
+        Err(err) => Err(err),
+        Ok(_nbterm) => {
+            loop {
+                match show_image(&mut args, file_index) {
+                    Ok(Action::Goto(index)) => {
+                        file_index = index;
+                    }
+                    Ok(Action::Quit) => {
+                        break Ok(());
+                    }
+                    Err(err) => {
+                        break Err(err);
+                    }
+                }
+            }
+        }
+    };
+
+    if let Err(err) = res {
+        eprintln!("{}: {}", args.paths[file_index].to_string_lossy(), err);
+        std::process::exit(1);
+    }
+}
+
+enum Action {
+    Goto(usize),
+    Quit,
+}
+
+fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
+    let path = &args.paths[file_index];
+    let file = File::open(path)?;
     let reader = BufReader::new(file);
 
     let cycle_image: CycleImage = serde_json::from_reader(reader)?;
 
-    let _nbterm = NBTerm::new()?;
     let mut stdin = std::io::stdin().lock();
     let mut stdout = std::io::stdout().lock();
 
@@ -318,8 +355,8 @@ Alt+Page Down  Move view-port right by half a screen");
         });
     }
 
-    let filename = args.path.file_name().map(|f| f.to_string_lossy()).unwrap_or_else(|| args.path.to_string_lossy());
-    let mut message: String = filename.into();
+    let filename = path.file_name().map(|f| f.to_string_lossy()).unwrap_or_else(|| path.to_string_lossy());
+    let mut message: String = format!(" {filename} ");
     let mut message_shown = args.osd;
     let message_display_duration = Duration::from_secs(3);
 
@@ -380,7 +417,7 @@ Alt+Page Down  Move view-port right by half a screen");
             // TODO: Windows support, maybe with ReadConsoleInput()?
             match nb_read_byte(&mut stdin)? {
                 None => break,
-                Some(b'q') => return Ok(()),
+                Some(b'q') => return Ok(Action::Quit),
                 Some(b'b') => {
                     args.blend = !args.blend;
 
@@ -411,10 +448,25 @@ Alt+Page Down  Move view-port right by half a screen");
                         show_message!("FPS: {}", args.fps);
                     }
                 }
+                Some(b'n') => {
+                    let new_index = file_index + 1;
+                    if new_index >= args.paths.len() {
+                        show_message!("Already at last file.");
+                    } else {
+                        return Ok(Action::Goto(new_index));
+                    }
+                }
+                Some(b'p') => {
+                    if file_index == 0 {
+                        show_message!("Already at first file.");
+                    } else {
+                        return Ok(Action::Goto(file_index - 1));
+                    }
+                }
                 Some(0x1b) => {
                     match nb_read_byte(&mut stdin)? {
-                        None => return Ok(()),
-                        Some(0x1b) => return Ok(()),
+                        None => return Ok(Action::Quit),
+                        Some(0x1b) => return Ok(Action::Quit),
                         Some(b'[') => {
                             match nb_read_byte(&mut stdin)? {
                                 None => break,
@@ -570,6 +622,20 @@ Alt+Page Down  Move view-port right by half a screen");
                         _ => {}
                     }
                 }
+                Some(b'0') => {
+                    return Ok(Action::Goto(args.paths.len() - 1));
+                }
+                Some(b'1') => {
+                    return Ok(Action::Goto(0));
+                }
+                Some(b) if b >= b'2' && b <= b'9' => {
+                    let index = (b - b'1') as usize;
+                    if index >= args.paths.len() {
+                        show_message!("Only {} files opened!", args.paths.len());
+                    } else {
+                        return Ok(Action::Goto(index));
+                    }
+                }
                 _ => {}
             }
         }
@@ -667,9 +733,9 @@ Alt+Page Down  Move view-port right by half a screen");
         // sleep for rest of frame
         let elapsed = frame_start_ts.elapsed();
         if frame_duration > elapsed && !interruptable_sleep(frame_duration - elapsed) {
-            break;
+            return Ok(Action::Quit);
         }
     }
 
-    Ok(())
+    Ok(Action::Quit)
 }
