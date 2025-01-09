@@ -1,3 +1,19 @@
+// color-cycle - render color cycle images on the terminal
+// Copyright (C) 2025  Mathias Panzenböck
+// 
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+// 
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+// 
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 pub mod image_to_ansi;
 pub mod color;
 pub mod image;
@@ -184,7 +200,11 @@ fn nb_read_byte(mut reader: impl Read) -> std::io::Result<Option<u8>> {
 }
 
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(version, about, long_about = None, after_help = "\
+color-cycle  Copyright (C) 2025  Mathias Panzenböck
+License: GPL-3.0
+Bugs: https://github.com/panzi/rust-color-cycle/issues"
+)]
 pub struct Args {
     /// Frames per second.
     /// 
