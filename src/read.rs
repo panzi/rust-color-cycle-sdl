@@ -17,7 +17,35 @@
 use crate::{color::Rgb, image::{CycleImage, IndexedImage}, palette::Palette, palette::Cycle};
 
 use std::convert::TryInto;
-use serde::{de::{Error, IgnoredAny, Visitor}, Deserializer};
+use serde::{de::{Error, IgnoredAny, Visitor}, Deserializer, Deserialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct FormatInfo {
+    pub version: u32,
+    #[serde(rename = "type")]
+    pub type_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct MagratheaWorldPaletteInfo {
+    pub id: u32,
+    pub name: String,
+    pub colors: Palette,
+    pub cycles: Box<[Cycle]>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MagratheaWorldData {
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    #[serde(rename = "paletteInfos")]
+    pub palette_infos: Vec<MagratheaWorldPaletteInfo>,
+    pub pixels: Box<[u8]>,
+
+    // TODO: pub events: Vec<MagratheaWorldEvent>,
+    // TODO: pub modes: Vec<MagratheaWorldMode>,
+}
 
 struct CycleImageVisitor;
 
@@ -35,6 +63,8 @@ impl<'de> Visitor<'de> for CycleImageVisitor {
         let mut palette = None;
         let mut cycles = None;
         let mut image = None;
+        let mut format: Option<FormatInfo> = None;
+        let mut data: Option<MagratheaWorldData> = None;
 
         while let Some(key) = map.next_key::<String>()? {
             match key.as_str() {
@@ -45,13 +75,19 @@ impl<'de> Visitor<'de> for CycleImageVisitor {
                     height = Some(map.next_value()?);
                 }
                 "colors" => {
-                    palette = Some(map.next_value()?)
+                    palette = Some(map.next_value()?);
                 }
                 "cycles" => {
-                    cycles = Some(map.next_value()?)
+                    cycles = Some(map.next_value()?);
                 }
                 "pixels" => {
-                    image = Some(map.next_value()?)
+                    image = Some(map.next_value()?);
+                }
+                "format" => {
+                    format = Some(map.next_value()?);
+                }
+                "data" => {
+                    data = Some(map.next_value()?);
                 }
                 _ => {
                     map.next_value::<IgnoredAny>()?;
@@ -59,28 +95,44 @@ impl<'de> Visitor<'de> for CycleImageVisitor {
             }
         }
 
-        if width.is_none() {
+        if let Some(format) = format {
+            if format.version != 2 {
+                return Err(Error::custom(format_args!("unsupported version: {}, expected: 2", format.version)));
+            }
+
+            let Some(data) = data else {
+                return Err(Error::missing_field("data"));
+            };
+
+            let Some(palette_info) = data.palette_infos.into_iter().next() else {
+                return Err(Error::custom("need at least one palette definition"));
+            };
+
+            let Some(indexed_image) = IndexedImage::from_buffer(data.width, data.height, data.pixels, palette_info.colors) else {
+                return Err(Error::custom("image buffer is too small for given width/height"));
+            };
+
+            return Ok(CycleImage::new(indexed_image, palette_info.cycles));
+        }
+
+        let Some(width) = width else {
             return Err(Error::missing_field("width"));
-        }
+        };
 
-        if height.is_none() {
+        let Some(height) = height else {
             return Err(Error::missing_field("height"));
-        }
+        };
 
-        if palette.is_none() {
+        let Some(palette) = palette else {
             return Err(Error::missing_field("colors"));
-        }
+        };
 
-        if cycles.is_none() {
+        let Some(cycles) = cycles else {
             return Err(Error::missing_field("cycles"));
-        }
+        };
 
-        if image.is_none() {
+        let Some(image) = image else {
             return Err(Error::missing_field("pixels"));
-        }
-
-        let (Some(width), Some(height), Some(palette), Some(cycles), Some(image)) = (width, height, palette, cycles, image) else {
-            return Err(Error::custom("internal error (some field is missing)"));
         };
 
         let Some(indexed_image) = IndexedImage::from_buffer(width, height, image, palette) else {
@@ -217,16 +269,12 @@ impl<'de> Visitor<'de> for CycleVisitor {
             }
         }
 
-        if low.is_none() {
+        let Some(low) = low else {
             return Err(Error::missing_field("low"));
-        }
+        };
 
-        if high.is_none() {
+        let Some(high) = high else {
             return Err(Error::missing_field("high"));
-        }
-
-        let (Some(low), Some(high)) = (low, high) else {
-            return Err(Error::custom("internal error"));
         };
 
         Ok(Cycle::new(low, high, rate, reverse))

@@ -5,10 +5,11 @@ animations. It was used in 90ies video games. This program renders such
 images to Unicode capable ANSI terminals. Windows is not supported, but
 I'd accept a pull request for that.
 
-This implementation only supports a single layer and no time based
-events (for now, maybe I'll add that at some later time).
+This implementation only supports a the background layer (no overlays)
+and no time based events (for now, maybe I'll add that at some later time).
 
-This viewer requires JSON files similar to what the
+This viewer reads [Living Worlds Maker](https://magrathea.onrender.com/)
+files (only the background layer) or JSON files similar to what the
 [Canvas Cycle](https://experiments.withgoogle.com/canvas-cycle) demo
 by Joseph Huckaby uses.
 
