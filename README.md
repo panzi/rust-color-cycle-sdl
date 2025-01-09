@@ -12,6 +12,8 @@ This viewer requires JSON files similar to what the
 [Canvas Cycle](https://experiments.withgoogle.com/canvas-cycle) demo
 by Joseph Huckaby uses.
 
+[Short Demo Video](https://www.youtube.com/watch?v=QMQ93uL1Fhk)
+
 ## Usage
 
 ```
