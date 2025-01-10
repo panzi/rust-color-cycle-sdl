@@ -617,14 +617,14 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                                     }
                                 }
                                 Some(byte) => {
-                                    if !byte.is_ascii_alphabetic() && byte != b'~' {
+                                    if byte.is_ascii_digit() || byte == b';' {
                                         // eat whole unsupported escape input sequence
                                         loop {
                                             let Some(byte) = nb_read_byte(&mut stdin)? else {
                                                 break;
                                             };
 
-                                            if byte.is_ascii_alphabetic() || byte == b'~' {
+                                            if !byte.is_ascii_digit() && byte != b';' {
                                                 break;
                                             }
                                         }
