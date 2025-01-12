@@ -173,10 +173,6 @@ pub fn image_to_ansi_into(prev_frame: &RgbImage, image: &RgbImage, full_width: b
                 }
             }
         }
-
-        if curr_line_y == line_y {
-            lines.push_str("\x1B[0m");
-        }
     }
 
     // Just to ensure that the cursor is at the correct position after
@@ -277,5 +273,5 @@ pub fn simple_image_to_ansi_into(image: &RgbImage, lines: &mut String) {
         }
     }
 
-    let _ = write!(lines, "\x1B[{}D\x1B[0m", width);
+    lines.push_str("\x1B[0m");
 }
