@@ -78,3 +78,20 @@ Options:
 | `Page Down` | Move view-port down by half a screen |
 | `Alt`+`Page Up` | Move view-port left by half a screen |
 | `Alt`+`Page Down` | Move view-port right by half a screen |
+
+## Related Projects
+
+Other things I made that render Uinocde characters to the terminal:
+
+- [Bad Apple!! but its the Unix Terminal](https://github.com/panzi/rust-color-cycle)
+  (C): A program that displays the Bad Apple!! animation on the terminal.
+- [ANSI IMG](https://github.com/panzi/ansi-img) (Rust): Display images (including
+  animated GIFs) on the terminal.
+- [Unicode Bar Charts](https://github.com/panzi/js-unicode-bar-chart)
+  (JavaScript): Draw bar charts on the terminal. With 8 steps per character and
+  with colors.
+- [Unicode Progress Bars](https://github.com/panzi/js-unicode-progress-bar)
+  (JavaScript): Draw bar charts on the terminal. With 8 steps per character,
+  border styles, and colors.
+- [Unicode Unicode Plots](https://github.com/panzi/js-unicode-plot) (JavaScript):
+  Very simple plotting on the terminal. No colors.
