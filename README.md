@@ -83,6 +83,8 @@ Options:
 
 Other things I made that render Uinocde characters to the terminal:
 
+- [Term Flags](https://github.com/panzi/python-term-flags) (Python): A primitive
+  sytem to render simple scalable flags on the terminal using Unicode.
 - [Bad Apple!! but its the Unix Terminal](https://github.com/panzi/rust-color-cycle)
   (C): A program that displays the Bad Apple!! animation on the terminal.
 - [ANSI IMG](https://github.com/panzi/ansi-img) (Rust): Display images (including
