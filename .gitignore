@@ -1,4 +1,6 @@
 /target
 /tmp
+.*
+!.gitignore
 perf.data
 perf.data.old
