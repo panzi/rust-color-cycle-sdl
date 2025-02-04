@@ -83,6 +83,8 @@ Options:
 
 Other things I made that render Uinocde characters to the terminal:
 
+- [Progress Pride Bar](https://github.com/panzi/progress-pride-bar) (Rust): A
+  progress bar for the terminal that looks like the progress pride flag.
 - [Term Flags](https://github.com/panzi/python-term-flags) (Python): A primitive
   sytem to render simple scalable flags on the terminal using Unicode.
 - [Bad Apple!! but its the Unix Terminal](https://github.com/panzi/rust-color-cycle)
