@@ -9,6 +9,11 @@ for (const jsFilename of process.argv.slice(2)) {
             fs.writeFileSync(jsonFilename, JSON.stringify(data), {
                 encoding: 'utf-8'
             });
+        },
+        initScene(data) {
+            fs.writeFileSync(jsonFilename, JSON.stringify(data), {
+                encoding: 'utf-8'
+            });
         }
     });
 }
