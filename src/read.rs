@@ -65,6 +65,7 @@ impl<'de> Visitor<'de> for CycleImageVisitor {
         let mut image = None;
         let mut format: Option<FormatInfo> = None;
         let mut data: Option<MagratheaWorldData> = None;
+        let mut base = None;
 
         while let Some(key) = map.next_key::<String>()? {
             match key.as_str() {
@@ -89,10 +90,18 @@ impl<'de> Visitor<'de> for CycleImageVisitor {
                 "data" => {
                     data = Some(map.next_value()?);
                 }
+                "base" => {
+                    base = Some(map.next_value()?);
+                }
                 _ => {
                     map.next_value::<IgnoredAny>()?;
                 }
             }
+        }
+
+        if let Some(base) = base {
+            // TODO: Support whole Living Worlds file format. This is just the background layer.
+            return Ok(base);
         }
 
         if let Some(format) = format {
