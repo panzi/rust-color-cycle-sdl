@@ -16,7 +16,7 @@
 
 use std::{fmt::Display, ops::{Index, IndexMut}};
 
-use crate::color::{blend, Rgb};
+use crate::color::Rgb;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Palette(pub Box<[Rgb; 256]>);
@@ -105,13 +105,13 @@ impl Palette {
                     let src_index = dest_index + distance;
                     let src_index1 = src_index % size;
                     let src_index2 = (src_index + 1) % size;
-                    dest[dest_index as usize] = blend(src[src_index1 as usize], src[src_index2 as usize], mid);
+                    dest[dest_index as usize] = crate::color::blend(src[src_index1 as usize], src[src_index2 as usize], mid);
                 }
             } else {
                 for src_index1 in 0..size {
                     let dest_index = (src_index1 + distance) % size;
                     let src_index2 = (src_index1 + 1) % size;
-                    dest[dest_index as usize] = blend(src[src_index1 as usize], src[src_index2 as usize], 1.0 - mid);
+                    dest[dest_index as usize] = crate::color::blend(src[src_index1 as usize], src[src_index2 as usize], 1.0 - mid);
                 }
             }
         }
@@ -133,6 +133,12 @@ impl Palette {
         } else {
             self.apply_cycles(cycles, now);
         }
+    }
+}
+
+pub fn blend(p1: &Palette, p2: &Palette, mid: f64, output: &mut Palette) {
+    for index in 0..256 {
+        output.0[index] = crate::color::blend(p1.0[index], p2.0[index], mid);
     }
 }
 
