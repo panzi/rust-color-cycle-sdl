@@ -14,9 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::{color::Rgb, image::{CycleImage, IndexedImage}, palette::Palette, palette::Cycle};
+use crate::{color::Rgb, image::{CycleImage, IndexedImage}, living_world::{LivingWorld, TimedEvent}, palette::{Cycle, Palette}};
 
-use std::convert::TryInto;
+use std::{collections::HashMap, convert::TryInto};
 use serde::{de::{Error, IgnoredAny, Visitor}, Deserializer, Deserialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -63,9 +63,6 @@ impl<'de> Visitor<'de> for CycleImageVisitor {
         let mut palette = None;
         let mut cycles = None;
         let mut image = None;
-        let mut format: Option<FormatInfo> = None;
-        let mut data: Option<MagratheaWorldData> = None;
-        let mut base = None;
 
         while let Some(key) = map.next_key::<String>()? {
             match key.as_str() {
@@ -84,44 +81,10 @@ impl<'de> Visitor<'de> for CycleImageVisitor {
                 "pixels" => {
                     image = Some(map.next_value()?);
                 }
-                "format" => {
-                    format = Some(map.next_value()?);
-                }
-                "data" => {
-                    data = Some(map.next_value()?);
-                }
-                "base" => {
-                    base = Some(map.next_value()?);
-                }
                 _ => {
                     map.next_value::<IgnoredAny>()?;
                 }
             }
-        }
-
-        if let Some(base) = base {
-            // TODO: Support whole Living Worlds file format. This is just the background layer.
-            return Ok(base);
-        }
-
-        if let Some(format) = format {
-            if format.version != 2 {
-                return Err(Error::custom(format_args!("unsupported version: {}, expected: 2", format.version)));
-            }
-
-            let Some(data) = data else {
-                return Err(Error::missing_field("data"));
-            };
-
-            let Some(palette_info) = data.palette_infos.into_iter().next() else {
-                return Err(Error::custom("need at least one palette definition"));
-            };
-
-            let Some(indexed_image) = IndexedImage::from_buffer(data.width, data.height, data.pixels, palette_info.colors) else {
-                return Err(Error::custom("image buffer is too small for given width/height"));
-            };
-
-            return Ok(CycleImage::new(indexed_image, palette_info.cycles));
         }
 
         let Some(width) = width else {
@@ -157,6 +120,197 @@ impl<'de> serde::de::Deserialize<'de> for CycleImage {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where D: Deserializer<'de> {
         deserializer.deserialize_map(CycleImageVisitor)
+    }
+}
+
+#[derive(Debug)]
+struct Timeline(pub Vec<(u32, String)>);
+
+struct TimelineVisitor;
+
+impl<'de> Visitor<'de> for TimelineVisitor {
+    type Value = Timeline;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a Living Worlds timeline: map of seconds to palette names or list of seconds-names tuples")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where A: serde::de::SeqAccess<'de> {
+        let mut timeline = if let Some(size) = seq.size_hint() { Vec::with_capacity(size) } else { Vec::new() };
+
+        while let Some(item) = seq.next_element()? {
+            timeline.push(item);
+        }
+
+        Ok(Timeline(timeline))
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where A: serde::de::MapAccess<'de> {
+        let mut timeline = if let Some(size) = map.size_hint() { Vec::with_capacity(size) } else { Vec::new() };
+
+        while let Some(time_of_day) = map.next_key::<String>()? {
+            let time_of_day = match time_of_day.parse() {
+                Ok(value) => value,
+                Err(err) => return Err(Error::custom(format_args!("illegal time of day in timeline: {:?}\n{}", time_of_day, err)))
+            };
+            let name = map.next_value()?;
+            timeline.push((time_of_day, name));
+        }
+
+        Ok(Timeline(timeline))
+    }
+}
+
+impl<'de> serde::de::Deserialize<'de> for Timeline {
+    #[inline]
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: Deserializer<'de> {
+        deserializer.deserialize_any(TimelineVisitor)
+    }
+}
+
+struct LivingWorldVisitor;
+
+impl<'de> Visitor<'de> for LivingWorldVisitor {
+    type Value = LivingWorld;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a Living Worlds file")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where A: serde::de::MapAccess<'de> {
+        let mut width = None;
+        let mut height = None;
+        let mut palette = None;
+        let mut cycles = None;
+        let mut image = None;
+        let mut format: Option<FormatInfo> = None;
+        let mut data: Option<MagratheaWorldData> = None;
+        let mut base: Option<CycleImage> = None;
+        let mut palettes_map: Option<HashMap<String, CycleImage>> = None;
+        let mut named_timeline: Option<Timeline> = None;
+
+        while let Some(key) = map.next_key::<String>()? {
+            match key.as_str() {
+                "width" => {
+                    width = Some(map.next_value()?);
+                }
+                "height" => {
+                    height = Some(map.next_value()?);
+                }
+                "colors" => {
+                    palette = Some(map.next_value()?);
+                }
+                "cycles" => {
+                    cycles = Some(map.next_value()?);
+                }
+                "pixels" => {
+                    image = Some(map.next_value()?);
+                }
+                "format" => {
+                    format = Some(map.next_value()?);
+                }
+                "data" => {
+                    data = Some(map.next_value()?);
+                }
+                "base" => {
+                    base = Some(map.next_value()?);
+                }
+                "palettes" => {
+                    palettes_map = Some(map.next_value()?);
+                }
+                "timeline" => {
+                    named_timeline = Some(map.next_value()?);
+                }
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
+                }
+            }
+        }
+
+        if let Some(base) = base {
+            let palettes_len: usize = if let Some(palettes) = &palettes_map { palettes.len() } else { 0 };
+
+            let mut palettes = Vec::with_capacity(palettes_len);
+            let mut index_map = HashMap::with_capacity(palettes_len);
+            if let Some(palettes_map) = palettes_map {
+                for (index, (key, image)) in palettes_map.into_iter().enumerate() {
+                    index_map.insert(key, index);
+                    palettes.push(image);
+                }
+            }
+
+            let timeline_len = if let Some(Timeline(timeline)) = &named_timeline { timeline.len() } else { 0 };
+            let mut timeline = Vec::with_capacity(timeline_len);
+            if let Some(Timeline(named_timeline)) = named_timeline {
+                for (time_of_day, palette_name) in named_timeline {
+                    if let Some(palette_index) = index_map.get(&palette_name) {
+                        timeline.push(TimedEvent::new(time_of_day, *palette_index));
+                    } else {
+                        return Err(Error::custom(format_args!("missing palette name referenced in timeline: {:?}", palette_name)));
+                    }
+                }
+            }
+
+            return Ok(LivingWorld::new(base, palettes.into_boxed_slice(), timeline.into_boxed_slice()));
+        }
+
+        if let Some(format) = format {
+            if format.version != 2 {
+                return Err(Error::custom(format_args!("unsupported version: {}, expected: 2", format.version)));
+            }
+
+            let Some(data) = data else {
+                return Err(Error::missing_field("data"));
+            };
+
+            let Some(palette_info) = data.palette_infos.into_iter().next() else {
+                return Err(Error::custom("need at least one palette definition"));
+            };
+
+            let Some(indexed_image) = IndexedImage::from_buffer(data.width, data.height, data.pixels, palette_info.colors) else {
+                return Err(Error::custom("image buffer is too small for given width/height"));
+            };
+
+            return Ok(CycleImage::new(indexed_image, palette_info.cycles).into());
+        }
+
+        let Some(width) = width else {
+            return Err(Error::missing_field("width"));
+        };
+
+        let Some(height) = height else {
+            return Err(Error::missing_field("height"));
+        };
+
+        let Some(palette) = palette else {
+            return Err(Error::missing_field("colors"));
+        };
+
+        let Some(cycles) = cycles else {
+            return Err(Error::missing_field("cycles"));
+        };
+
+        let Some(image) = image else {
+            return Err(Error::missing_field("pixels"));
+        };
+
+        let Some(indexed_image) = IndexedImage::from_buffer(width, height, image, palette) else {
+            return Err(Error::custom("image buffer is too small for given width/height"));
+        };
+
+        Ok(CycleImage::new(indexed_image, cycles).into())
+    }
+}
+
+impl<'de> serde::de::Deserialize<'de> for LivingWorld {
+    #[inline]
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: Deserializer<'de> {
+        deserializer.deserialize_map(LivingWorldVisitor)
     }
 }
 
