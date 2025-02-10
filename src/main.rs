@@ -19,6 +19,7 @@ pub mod color;
 pub mod image;
 pub mod palette;
 pub mod read;
+pub mod world;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -339,6 +340,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
         img_width.min(term_width),
         img_height.min(term_height));
 
+    let mut frame = RgbImage::new(viewport.width(), viewport.height());
     let mut prev_frame = RgbImage::new(viewport.width(), viewport.height());
 
     let mut old_term_width = term_width;
@@ -658,6 +660,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
         let viewport_column = viewport_x + 1;
         if old_x != x || old_y != y || old_term_width != term_width || old_term_height != term_height {
             viewport.get_rect_from(x, y, term_width, term_height, &cycle_image);
+            frame = RgbImage::new(viewport.width(), viewport.height());
 
             if old_term_width != term_width || old_term_height != term_height {
                 prev_frame = RgbImage::new(viewport.width(), viewport.height());
@@ -694,16 +697,16 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
             }
         }
 
-        viewport.render_frame((frame_start_ts - loop_start_ts).as_secs_f64(), args.blend);
+        viewport.render_frame((frame_start_ts - loop_start_ts).as_secs_f64(), args.blend, &mut frame);
 
         let full_width = viewport.width() >= term_width;
         if full_redraw {
-            simple_image_to_ansi_into(viewport.rgb_image(), &mut linebuf);
+            simple_image_to_ansi_into(&frame, &mut linebuf);
         } else {
-            image_to_ansi_into(&prev_frame, viewport.rgb_image(), full_width, &mut linebuf);
+            image_to_ansi_into(&prev_frame, &frame, full_width, &mut linebuf);
         }
 
-        viewport.swap_image_buffer(&mut prev_frame);
+        std::mem::swap(&mut frame, &mut prev_frame);
 
         let _ = write!(stdout, "\x1B[{};{}H{linebuf}", viewport_row, viewport_column);
 

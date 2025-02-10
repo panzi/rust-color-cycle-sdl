@@ -338,18 +338,15 @@ impl From<IndexedImage> for RgbImage {
 pub struct CycleImage {
     frame_palette: Palette,
     indexed_image: IndexedImage,
-    rgb_image: RgbImage,
     cycles: Box<[Cycle]>,
 }
 
 impl CycleImage {
     #[inline]
     pub fn new(indexed_image: IndexedImage, cycles: Box<[Cycle]>) -> Self {
-        let rgb_image = RgbImage::new(indexed_image.width(), indexed_image.height());
         Self {
             frame_palette: indexed_image.palette.clone(),
             indexed_image,
-            rgb_image,
             cycles,
         }
     }
@@ -357,11 +354,6 @@ impl CycleImage {
     #[inline]
     pub fn indexed_image(&self) -> &IndexedImage {
         &self.indexed_image
-    }
-
-    #[inline]
-    pub fn rgb_image(&self) -> &RgbImage {
-        &self.rgb_image
     }
 
     #[inline]
@@ -400,16 +392,11 @@ impl CycleImage {
     }
 
     #[inline]
-    pub fn get_pixel(&self, x: u32, y: u32) -> Rgb {
-        self.rgb_image().get_pixel(x, y)
-    }
-
-    #[inline]
-    pub fn render_frame(&mut self, now: f64, blend: bool) {
+    pub fn render_frame(&mut self, now: f64, blend: bool, target: &mut RgbImage) {
         self.frame_palette.apply_cycles_from(&self.indexed_image.palette, &self.cycles, now, blend);
         // self.frame_palette.clone_from(&self.indexed_image.palette);
         // self.frame_palette.apply_cycles(&self.cycles, now);
-        self.indexed_image.apply_with_palette(&mut self.rgb_image, &self.frame_palette);
+        self.indexed_image.apply_with_palette(target, &self.frame_palette);
     }
 
     #[inline]
@@ -417,7 +404,6 @@ impl CycleImage {
         Self {
             frame_palette: self.frame_palette.clone(),
             indexed_image: self.indexed_image.get_rect(x, y, width, height),
-            rgb_image: self.rgb_image.get_rect(x, y, width, height),
             cycles: self.cycles.clone(),
         }
     }
@@ -425,18 +411,10 @@ impl CycleImage {
     #[inline]
     pub fn get_rect_from(&mut self, x: u32, y: u32, width: u32, height: u32, other: &CycleImage) {
         self.indexed_image.get_rect_from(x, y, width, height, &other.indexed_image);
-        self.rgb_image = RgbImage::new(self.indexed_image.width(), self.indexed_image.height());
-    }
-
-    #[inline]
-    pub fn swap_image_buffer(&mut self, image: &mut RgbImage) {
-        assert!(image.size() == self.rgb_image.size());
-        std::mem::swap(&mut self.rgb_image, image);
     }
 
     #[inline]
     pub fn resize(&mut self, width: u32, height: u32, index: u8) {
         self.indexed_image.resize(width, height, index);
-        self.rgb_image.resize(width, height, self.frame_palette[index]);
     }
 }
