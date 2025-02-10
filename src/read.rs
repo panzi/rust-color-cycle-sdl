@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::{color::Rgb, image::{CycleImage, IndexedImage}, living_world::{LivingWorld, TimedEvent}, palette::{Cycle, Palette}};
+use crate::{color::Rgb, image::{living_world::TimedEvent, CycleImage, IndexedImage, LivingWorld}, palette::{Cycle, Palette}};
 
 use std::{collections::HashMap, convert::TryInto};
 use serde::{de::{Error, IgnoredAny, Visitor}, Deserializer, Deserialize};

@@ -14,7 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::image::CycleImage;
+use super::CycleImage;
+
+// render files from http://www.effectgames.com/demos/worlds/
 
 #[derive(Debug, Clone)]
 pub struct LivingWorld {

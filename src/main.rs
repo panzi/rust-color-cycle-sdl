@@ -19,7 +19,6 @@ pub mod color;
 pub mod image;
 pub mod palette;
 pub mod read;
-pub mod living_world;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,12 +31,11 @@ use std::io::{BufReader, Read, Write};
 use std::mem::MaybeUninit;
 
 use clap::Parser;
-use image::{CycleImage, RgbImage};
+use image::{CycleImage, LivingWorld, RgbImage};
 use image_to_ansi::{image_to_ansi_into, simple_image_to_ansi_into};
 
 #[cfg(not(windows))]
 use libc;
-use living_world::LivingWorld;
 
 const MAX_FPS: u32 = 10_000;
 
@@ -303,8 +301,8 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
     let reader = BufReader::new(file);
 
     let living_world: LivingWorld = serde_json::from_reader(reader)?;
-    // TODO: implement full living worlds support
-    let cycle_image: CycleImage = living_world.into();
+    // TODO: implement full worlds demo support
+    let cycle_image: &CycleImage = living_world.base();
 
     let mut stdin = std::io::stdin().lock();
     let mut stdout = std::io::stdout().lock();
