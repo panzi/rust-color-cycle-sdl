@@ -16,11 +16,10 @@
 
 use crate::palette::{Cycle, Palette};
 
-use super::{IndexedImage, RgbImage};
+use super::IndexedImage;
 
 #[derive(Debug, Clone)]
 pub struct CycleImage {
-    frame_palette: Palette,
     indexed_image: IndexedImage,
     cycles: Box<[Cycle]>,
 }
@@ -29,7 +28,6 @@ impl CycleImage {
     #[inline]
     pub fn new(indexed_image: IndexedImage, cycles: Box<[Cycle]>) -> Self {
         Self {
-            frame_palette: indexed_image.palette().clone(),
             indexed_image,
             cycles,
         }
@@ -76,17 +74,8 @@ impl CycleImage {
     }
 
     #[inline]
-    pub fn render_frame(&mut self, now: f64, blend: bool, target: &mut RgbImage) {
-        self.frame_palette.apply_cycles_from(self.indexed_image.palette(), &self.cycles, now, blend);
-        // self.frame_palette.clone_from(&self.indexed_image.palette);
-        // self.frame_palette.apply_cycles(&self.cycles, now);
-        self.indexed_image.apply_with_palette(target, &self.frame_palette);
-    }
-
-    #[inline]
     pub fn get_rect(&self, x: u32, y: u32, width: u32, height: u32) -> Self {
         Self {
-            frame_palette: self.frame_palette.clone(),
             indexed_image: self.indexed_image.get_rect(x, y, width, height),
             cycles: self.cycles.clone(),
         }

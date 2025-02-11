@@ -38,6 +38,7 @@ use image_to_ansi::{image_to_ansi_into, simple_image_to_ansi_into};
 use libc;
 
 const MAX_FPS: u32 = 10_000;
+const TIME_STEP: u32 = 60 * 5;
 
 pub struct NBTerm;
 
@@ -295,6 +296,35 @@ enum Action {
     Quit,
 }
 
+fn get_today_seconds() -> u32 {
+    #[cfg(not(windows))]
+    unsafe {
+        let time = libc::time(std::ptr::null_mut());
+        let mut tm = MaybeUninit::<libc::tm>::zeroed();
+        if libc::localtime_r(&time, tm.as_mut_ptr()).is_null() {
+            return 0;
+        }
+        let tm = tm.assume_init();
+
+        tm.tm_hour as u32 * 60 * 60 + tm.tm_min as u32 * 60 + tm.tm_sec as u32
+    }
+
+    #[cfg(windows)]
+    unsafe {
+        let mut tm = MaybeUninit::<winapi::um::minwinbase::SYSTEMTIME>::zeroed();
+        winapi::um::sysinfoapi::GetLocalTime(tm.as_mut_ptr());
+        let tm = tm.assume_init();
+
+        tm.wHour as u32 * 60 * 60 + tm.wMinute as u32 * 60 + tm.wSecond
+    }
+}
+
+fn get_hours_mins(time_of_day: u32) -> (u32, u32) {
+    let mins = time_of_day / 60;
+    let hours = mins / 60;
+    (hours, mins - hours * 60)
+}
+
 fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
     let path = &args.paths[file_index];
     let file = File::open(path)?;
@@ -303,6 +333,8 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
     let living_world: LivingWorld = serde_json::from_reader(reader)?;
     // TODO: implement full worlds demo support
     let cycle_image: &CycleImage = living_world.base();
+    let mut blended_palette = cycle_image.palette().clone();
+    let mut cycled_palette = blended_palette.clone();
 
     let mut stdin = std::io::stdin().lock();
     let mut stdout = std::io::stdout().lock();
@@ -341,6 +373,12 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
         img_width.min(term_width),
         img_height.min(term_height));
 
+    let mut current_time: Option<u32> = if living_world.timeline().is_empty() {
+        Some(0)
+    } else {
+        None
+    };
+
     let mut frame = RgbImage::new(viewport.width(), viewport.height());
     let mut prev_frame = RgbImage::new(viewport.width(), viewport.height());
 
@@ -370,6 +408,11 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
 
     while running.load(Ordering::Relaxed) {
         let frame_start_ts = Instant::now();
+        let mut time_of_day = if let Some(current_time) = current_time {
+            current_time
+        } else {
+            get_today_seconds()
+        };
 
         // process input
         let term_size = term_size::dimensions();
@@ -463,6 +506,42 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                     } else {
                         return Ok(Action::Goto(file_index - 1));
                     }
+                }
+                Some(b'a') => {
+                    let rem = time_of_day % TIME_STEP;
+                    let new_time = time_of_day - rem;
+                    if new_time == time_of_day {
+                        if new_time < TIME_STEP {
+                            time_of_day = 24 * 60 * 60 - TIME_STEP;
+                        } else {
+                            time_of_day = new_time - TIME_STEP;
+                        }
+                    } else {
+                        time_of_day = new_time;
+                    }
+                    current_time = Some(time_of_day);
+                    let (hours, mins) = get_hours_mins(time_of_day);
+                    show_message!("{hours}:{mins}");
+                }
+                Some(b'd') => {
+                    let rem = time_of_day % TIME_STEP;
+                    let new_time = time_of_day - rem + TIME_STEP;
+                    if new_time >= 24 * 60 * 60 {
+                        time_of_day = 0;
+                    } else {
+                        time_of_day = new_time;
+                    }
+                    current_time = Some(time_of_day);
+                    let (hours, mins) = get_hours_mins(time_of_day);
+                    show_message!("{hours}:{mins}");
+                }
+                Some(b's') => {
+                    if current_time.is_some() {
+                        current_time = None;
+                        time_of_day = get_today_seconds();
+                    }
+                    let (hours, mins) = get_hours_mins(time_of_day);
+                    show_message!("{hours}:{mins}");
                 }
                 Some(0x1b) => {
                     match nb_read_byte(&mut stdin)? {
@@ -698,7 +777,43 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
             }
         }
 
-        viewport.render_frame((frame_start_ts - loop_start_ts).as_secs_f64(), args.blend, &mut frame);
+        if !living_world.timeline().is_empty() {
+            let mut palette1 = living_world.base().palette();
+            let mut palette2 = palette1;
+            let mut prev_time_of_day = 0;
+            let mut event_time_of_day = 0;
+
+            // TODO: binary search?
+            // XXX: what's with the white pixels?
+            let mut found = false;
+            for event in living_world.timeline() {
+                prev_time_of_day = event_time_of_day;
+                event_time_of_day = event.time_of_day();
+                palette1 = palette2;
+                palette2 = living_world.palettes()[event.palette_index()].palette();
+                if event_time_of_day > time_of_day {
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                prev_time_of_day = event_time_of_day;
+                event_time_of_day = 24 * 60 * 60;
+                palette1 = palette2;
+                palette2 = living_world.base().palette();
+            }
+
+            let current_span = event_time_of_day - prev_time_of_day;
+            let time_in_span = time_of_day - prev_time_of_day;
+            let value = time_in_span as f64 / current_span as f64;
+
+            crate::palette::blend(palette1, palette2, value, &mut blended_palette);
+        }
+
+        let value = (frame_start_ts - loop_start_ts).as_secs_f64();
+        cycled_palette.apply_cycles_from(&blended_palette, living_world.base().cycles(), value, args.blend);
+        viewport.indexed_image().apply_with_palette(&mut frame, &cycled_palette);
 
         let full_width = viewport.width() >= term_width;
         if full_redraw {

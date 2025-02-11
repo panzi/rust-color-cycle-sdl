@@ -137,27 +137,39 @@ impl<'de> Visitor<'de> for TimelineVisitor {
 
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
     where A: serde::de::SeqAccess<'de> {
-        let mut timeline = if let Some(size) = seq.size_hint() { Vec::with_capacity(size) } else { Vec::new() };
+        let mut timeline: Vec<(u32, String)> = if let Some(size) = seq.size_hint() {
+            Vec::with_capacity(size)
+        } else {
+            Vec::new()
+        };
 
         while let Some(item) = seq.next_element()? {
             timeline.push(item);
         }
+
+        timeline.sort_by(|a, b| a.0.cmp(&b.0));
 
         Ok(Timeline(timeline))
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
     where A: serde::de::MapAccess<'de> {
-        let mut timeline = if let Some(size) = map.size_hint() { Vec::with_capacity(size) } else { Vec::new() };
+        let mut timeline = if let Some(size) = map.size_hint() {
+            Vec::with_capacity(size)
+        } else {
+            Vec::new()
+        };
 
         while let Some(time_of_day) = map.next_key::<String>()? {
-            let time_of_day = match time_of_day.parse() {
+            let time_of_day: u32 = match time_of_day.parse() {
                 Ok(value) => value,
                 Err(err) => return Err(Error::custom(format_args!("illegal time of day in timeline: {:?}\n{}", time_of_day, err)))
             };
             let name = map.next_value()?;
             timeline.push((time_of_day, name));
         }
+
+        timeline.sort_by(|a, b| a.0.cmp(&b.0));
 
         Ok(Timeline(timeline))
     }
