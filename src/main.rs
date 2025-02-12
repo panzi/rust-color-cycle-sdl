@@ -334,7 +334,8 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
     // TODO: implement full worlds demo support
     let cycle_image: &CycleImage = living_world.base();
     let mut blended_palette = cycle_image.palette().clone();
-    let mut cycled_palette = blended_palette.clone();
+    let mut cycled_palette1 = blended_palette.clone();
+    let mut cycled_palette2 = blended_palette.clone();
 
     let mut stdin = std::io::stdin().lock();
     let mut stdout = std::io::stdout().lock();
@@ -777,43 +778,48 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
             }
         }
 
+        let blend_cycle = (frame_start_ts - loop_start_ts).as_secs_f64();
         if !living_world.timeline().is_empty() {
-            let mut palette1 = living_world.base().palette();
+            let mut palette1 = &living_world.palettes()[living_world.timeline().last().unwrap().palette_index()];
             let mut palette2 = palette1;
             let mut prev_time_of_day = 0;
-            let mut event_time_of_day = 0;
+            let mut next_time_of_day = 0;
 
             // TODO: binary search?
             // XXX: what's with the white pixels?
             let mut found = false;
             for event in living_world.timeline() {
-                prev_time_of_day = event_time_of_day;
-                event_time_of_day = event.time_of_day();
+                prev_time_of_day = next_time_of_day;
+                next_time_of_day = event.time_of_day();
                 palette1 = palette2;
-                palette2 = living_world.palettes()[event.palette_index()].palette();
-                if event_time_of_day > time_of_day {
+                palette2 = &living_world.palettes()[event.palette_index()];
+                if next_time_of_day > time_of_day {
                     found = true;
                     break;
                 }
             }
 
             if !found {
-                prev_time_of_day = event_time_of_day;
-                event_time_of_day = 24 * 60 * 60;
+                prev_time_of_day = next_time_of_day;
+                next_time_of_day = 24 * 60 * 60;
                 palette1 = palette2;
-                palette2 = living_world.base().palette();
+                palette2 = &living_world.palettes()[living_world.timeline().first().unwrap().palette_index()];
             }
 
-            let current_span = event_time_of_day - prev_time_of_day;
+            let current_span = next_time_of_day - prev_time_of_day;
             let time_in_span = time_of_day - prev_time_of_day;
-            let value = time_in_span as f64 / current_span as f64;
+            let blend_palettes = time_in_span as f64 / current_span as f64;
 
-            crate::palette::blend(palette1, palette2, value, &mut blended_palette);
+            cycled_palette1.apply_cycles_from(palette1.palette(), palette1.cycles(), blend_cycle, args.blend);
+            cycled_palette2.apply_cycles_from(palette2.palette(), palette2.cycles(), blend_cycle, args.blend);
+
+            crate::palette::blend(&cycled_palette1, &cycled_palette2, blend_palettes, &mut blended_palette);
+
+            viewport.indexed_image().apply_with_palette(&mut frame, &blended_palette);
+        } else {
+            cycled_palette1.apply_cycles_from(&blended_palette, cycle_image.cycles(), blend_cycle, args.blend);
+            viewport.indexed_image().apply_with_palette(&mut frame, &cycled_palette1);
         }
-
-        let value = (frame_start_ts - loop_start_ts).as_secs_f64();
-        cycled_palette.apply_cycles_from(&blended_palette, living_world.base().cycles(), value, args.blend);
-        viewport.indexed_image().apply_with_palette(&mut frame, &cycled_palette);
 
         let full_width = viewport.width() >= term_width;
         if full_redraw {

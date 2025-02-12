@@ -1,5 +1,6 @@
 import fs from "fs";
 
+// TODO: handle remap!
 for (const jsFilename of process.argv.slice(2)) {
     const jsonFilename = jsFilename.replace(/\.js$/i, '') + '.json';
     console.log(jsFilename, '->', jsonFilename);
