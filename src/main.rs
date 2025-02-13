@@ -38,7 +38,9 @@ use image_to_ansi::{image_to_ansi_into, simple_image_to_ansi_into};
 use libc;
 
 const MAX_FPS: u32 = 10_000;
-const TIME_STEP: u32 = 60 * 5;
+const TIME_STEP: u64 = 60 * 5 * 1000;
+const DAY_DURATION: u64 = 24 * 60 * 60 * 1000;
+const FAST_FORWARD_SPEED: u64 = 10_000;
 
 pub struct NBTerm;
 
@@ -249,6 +251,10 @@ P              Open previous file
 0              Open last file
 +              Increase frames per second by 1
 -              Decrease frames per second by 1
+F              Toogle fast forward ({FAST_FORWARD_SPEED}x speed).
+A              Go back in time by 5 minutes.
+D              Go forward in time by 5 minutes.
+S              Go to current time and continue normal progression.
 Cursor Up      Move view-port up by 1 pixel
 Cursor Down    Move view-port down by 1 pixel
 Cursor Left    Move view-port left by 1 pixel
@@ -296,31 +302,37 @@ enum Action {
     Quit,
 }
 
-fn get_today_seconds(time_speed: u32) -> u32 {
+fn get_time_of_day_msec(time_speed: u64) -> u64 {
     #[cfg(not(windows))]
     unsafe {
-        let time = libc::time(std::ptr::null_mut()) * time_speed as libc::time_t;
-        let mut tm = MaybeUninit::<libc::tm>::zeroed();
-        if libc::localtime_r(&time, tm.as_mut_ptr()).is_null() {
+        let mut tod = MaybeUninit::<libc::timeval>::zeroed();
+        if libc::gettimeofday(tod.as_mut_ptr(), std::ptr::null_mut()) != 0 {
             return 0;
         }
-        let tm = tm.assume_init();
-
-        tm.tm_hour as u32 * 60 * 60 + tm.tm_min as u32 * 60 + tm.tm_sec as u32
+        let tod = tod.assume_init_ref();
+        (
+            tod.tv_sec as u64 * 1000 * time_speed +
+            tod.tv_usec as u64 * time_speed / 1000
+        ) % DAY_DURATION
     }
 
     #[cfg(windows)]
     unsafe {
         let mut tm = MaybeUninit::<winapi::um::minwinbase::SYSTEMTIME>::zeroed();
         winapi::um::sysinfoapi::GetLocalTime(tm.as_mut_ptr());
-        let tm = tm.assume_init();
+        let tm = tm.assume_init_ref();
 
-        tm.wHour as u32 * 60 * 60 + tm.wMinute as u32 * 60 + tm.wSecond
+        (
+            tm.wHour as u64 * 60 * 60 * 1000 +
+            tm.wMinute as u64 * 60 * 1000 +
+            tm.wSecond as u64 * 1000 +
+            tm.wMilliseconds as u64
+        ) * time_speed % DAY_DURATION
     }
 }
 
-fn get_hours_mins(time_of_day: u32) -> (u32, u32) {
-    let mins = time_of_day / 60;
+fn get_hours_mins(time_of_day: u64) -> (u32, u32) {
+    let mins = (time_of_day / (60 * 1000)) as u32;
     let hours = mins / 60;
     (hours, mins - hours * 60)
 }
@@ -374,12 +386,12 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
         img_width.min(term_width),
         img_height.min(term_height));
 
-    let mut current_time: Option<u32> = if living_world.timeline().is_empty() {
+    let mut current_time: Option<u64> = if living_world.timeline().is_empty() {
         Some(0)
     } else {
         None
     };
-    let mut time_speed: u32 = 1;
+    let mut time_speed: u64 = 1;
 
     let mut frame = RgbImage::new(viewport.width(), viewport.height());
     let mut prev_frame = RgbImage::new(viewport.width(), viewport.height());
@@ -413,7 +425,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
         let mut time_of_day = if let Some(current_time) = current_time {
             current_time
         } else {
-            get_today_seconds(time_speed)
+            get_time_of_day_msec(time_speed)
         };
 
         // process input
@@ -515,7 +527,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                     let new_time = time_of_day - rem;
                     if new_time == time_of_day {
                         if new_time < TIME_STEP {
-                            time_of_day = 24 * 60 * 60 - TIME_STEP;
+                            time_of_day = DAY_DURATION - TIME_STEP;
                         } else {
                             time_of_day = new_time - TIME_STEP;
                         }
@@ -529,7 +541,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                 Some(b'd') => {
                     let rem = time_of_day % TIME_STEP;
                     let new_time = time_of_day - rem + TIME_STEP;
-                    if new_time >= 24 * 60 * 60 {
+                    if new_time >= DAY_DURATION {
                         time_of_day = 0;
                     } else {
                         time_of_day = new_time;
@@ -540,15 +552,18 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                 }
                 Some(b's') => {
                     if current_time.is_some() {
+                        time_speed = 1;
                         current_time = None;
-                        time_of_day = get_today_seconds(time_speed);
+                        time_of_day = get_time_of_day_msec(time_speed);
                     }
                     let (hours, mins) = get_hours_mins(time_of_day);
                     show_message!("{hours}:{mins:02}");
                 }
                 Some(b'f') => {
                     if time_speed == 1 {
-                        time_speed = 24 * 60;
+                        time_speed = FAST_FORWARD_SPEED;
+                        current_time = None;
+                        time_of_day = get_time_of_day_msec(time_speed);
                         show_message!("Fast Forward: ON");
                     } else {
                         time_speed = 1;
@@ -801,7 +816,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
             let mut found = false;
             for event in living_world.timeline() {
                 prev_time_of_day = next_time_of_day;
-                next_time_of_day = event.time_of_day();
+                next_time_of_day = event.time_of_day() as u64 * 1000;
                 palette1 = palette2;
                 palette2 = &living_world.palettes()[event.palette_index()];
                 if next_time_of_day > time_of_day {
@@ -812,7 +827,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
 
             if !found {
                 prev_time_of_day = next_time_of_day;
-                next_time_of_day = 24 * 60 * 60;
+                next_time_of_day = DAY_DURATION;
                 palette1 = palette2;
                 palette2 = &living_world.palettes()[living_world.timeline().first().unwrap().palette_index()];
             }
@@ -845,6 +860,11 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
 
         old_term_width  = term_width;
         old_term_height = term_height;
+
+        if time_speed != 1 && message.is_empty() {
+            let (hours, mins) = get_hours_mins(time_of_day);
+            show_message!("{hours}:{mins:02}");
+        }
 
         if message_end_ts >= frame_start_ts {
             if updated_message && old_message_len > message.len() {
