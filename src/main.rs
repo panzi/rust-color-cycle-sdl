@@ -423,6 +423,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
             (img_width, img_height)
         };
 
+        let old_message_len = message.len();
         let old_x = x;
         let old_y = y;
 
@@ -522,7 +523,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                     }
                     current_time = Some(time_of_day);
                     let (hours, mins) = get_hours_mins(time_of_day);
-                    show_message!("{hours}:{mins}");
+                    show_message!("{hours}:{mins:02}");
                 }
                 Some(b'd') => {
                     let rem = time_of_day % TIME_STEP;
@@ -534,7 +535,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                     }
                     current_time = Some(time_of_day);
                     let (hours, mins) = get_hours_mins(time_of_day);
-                    show_message!("{hours}:{mins}");
+                    show_message!("{hours}:{mins:02}");
                 }
                 Some(b's') => {
                     if current_time.is_some() {
@@ -542,7 +543,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                         time_of_day = get_today_seconds();
                     }
                     let (hours, mins) = get_hours_mins(time_of_day);
-                    show_message!("{hours}:{mins}");
+                    show_message!("{hours}:{mins:02}");
                 }
                 Some(0x1b) => {
                     match nb_read_byte(&mut stdin)? {
@@ -836,7 +837,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
         old_term_height = term_height;
 
         if message_end_ts >= frame_start_ts {
-            if updated_message {
+            if updated_message && old_message_len > message.len() {
                 // full redraw next frame by faking old term size of 0x0
                 old_term_width  = 0;
                 old_term_height = 0;
