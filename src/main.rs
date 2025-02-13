@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::fs::File;
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Read, StdinLock, StdoutLock, Write};
 
 #[cfg(not(windows))]
 use std::mem::MaybeUninit;
@@ -235,6 +235,14 @@ pub struct Args {
     pub paths: Vec<PathBuf>,
 }
 
+struct GlobalState {
+    running: Arc<AtomicBool>,
+    current_time: Option<u64>,
+    time_speed: u64,
+    stdin: StdinLock<'static>,
+    stdout: StdoutLock<'static>,
+}
+
 fn main() {
     let mut args = Args::parse();
 
@@ -270,13 +278,28 @@ Alt+Page Down  Move view-port right by half a screen");
         return;
     }
 
+    let mut state = GlobalState {
+        running: Arc::new(AtomicBool::new(true)),
+        stdin: std::io::stdin().lock(),
+        stdout: std::io::stdout().lock(),
+        current_time: None,
+        time_speed: 1,
+    };
+
+    {
+        let running = state.running.clone();
+        let _ = ctrlc::set_handler(move || {
+            running.store(false, Ordering::Relaxed);
+        });
+    }
+
     let mut file_index = 0;
 
     let res = match NBTerm::new() {
         Err(err) => Err(err),
         Ok(_nbterm) => {
             loop {
-                match show_image(&mut args, file_index) {
+                match show_image(&mut args, &mut state, file_index) {
                     Ok(Action::Goto(index)) => {
                         file_index = index;
                     }
@@ -337,7 +360,7 @@ fn get_hours_mins(time_of_day: u64) -> (u32, u32) {
     (hours, mins - hours * 60)
 }
 
-fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
+fn show_image(args: &mut Args, state: &mut GlobalState, file_index: usize) -> std::io::Result<Action> {
     let path = &args.paths[file_index];
     let file = File::open(path)?;
     let reader = BufReader::new(file);
@@ -348,9 +371,6 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
     let mut blended_palette = cycle_image.palette().clone();
     let mut cycled_palette1 = blended_palette.clone();
     let mut cycled_palette2 = blended_palette.clone();
-
-    let mut stdin = std::io::stdin().lock();
-    let mut stdout = std::io::stdout().lock();
 
     let mut frame_duration = Duration::from_secs_f64(1.0 / (args.fps as f64));
     let mut linebuf = String::new();
@@ -367,8 +387,8 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
     };
 
     // initial blank screen
-    let _ = write!(stdout, "\x1B[1;1H\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m\x1B[2J");
-    let _ = stdout.flush();
+    let _ = write!(state.stdout, "\x1B[1;1H\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m\x1B[2J");
+    let _ = state.stdout.flush();
 
     let mut x = 0;
     let mut y = 0;
@@ -386,27 +406,11 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
         img_width.min(term_width),
         img_height.min(term_height));
 
-    let mut current_time: Option<u64> = if living_world.timeline().is_empty() {
-        Some(0)
-    } else {
-        None
-    };
-    let mut time_speed: u64 = 1;
-
     let mut frame = RgbImage::new(viewport.width(), viewport.height());
     let mut prev_frame = RgbImage::new(viewport.width(), viewport.height());
 
     let mut old_term_width = term_width;
     let mut old_term_height = term_height;
-
-    let running = Arc::new(AtomicBool::new(true));
-
-    {
-        let running = running.clone();
-        let _ = ctrlc::set_handler(move || {
-            running.store(false, Ordering::Relaxed);
-        });
-    }
 
     let filename = path.file_name().map(|f| f.to_string_lossy()).unwrap_or_else(|| path.to_string_lossy());
     let mut message: String = format!(" {filename} ");
@@ -420,12 +424,12 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
         loop_start_ts
     };
 
-    while running.load(Ordering::Relaxed) {
+    while state.running.load(Ordering::Relaxed) {
         let frame_start_ts = Instant::now();
-        let mut time_of_day = if let Some(current_time) = current_time {
+        let mut time_of_day = if let Some(current_time) = state.current_time {
             current_time
         } else {
-            get_time_of_day_msec(time_speed)
+            get_time_of_day_msec(state.time_speed)
         };
 
         // process input
@@ -474,7 +478,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
 
         loop {
             // TODO: Windows support, maybe with ReadConsoleInput()?
-            match nb_read_byte(&mut stdin)? {
+            match nb_read_byte(&mut state.stdin)? {
                 None => break,
                 Some(b'q') => return Ok(Action::Quit),
                 Some(b'b') => {
@@ -534,7 +538,8 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                     } else {
                         time_of_day = new_time;
                     }
-                    current_time = Some(time_of_day);
+                    state.time_speed = 1;
+                    state.current_time = Some(time_of_day);
                     let (hours, mins) = get_hours_mins(time_of_day);
                     show_message!("{hours}:{mins:02}");
                 }
@@ -546,36 +551,37 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                     } else {
                         time_of_day = new_time;
                     }
-                    current_time = Some(time_of_day);
+                    state.time_speed = 1;
+                    state.current_time = Some(time_of_day);
                     let (hours, mins) = get_hours_mins(time_of_day);
                     show_message!("{hours}:{mins:02}");
                 }
                 Some(b's') => {
-                    if current_time.is_some() {
-                        time_speed = 1;
-                        current_time = None;
-                        time_of_day = get_time_of_day_msec(time_speed);
+                    if state.current_time.is_some() {
+                        state.time_speed = 1;
+                        state.current_time = None;
+                        time_of_day = get_time_of_day_msec(state.time_speed);
                     }
                     let (hours, mins) = get_hours_mins(time_of_day);
                     show_message!("{hours}:{mins:02}");
                 }
                 Some(b'f') => {
-                    if time_speed == 1 {
-                        time_speed = FAST_FORWARD_SPEED;
-                        current_time = None;
-                        time_of_day = get_time_of_day_msec(time_speed);
+                    if state.time_speed == 1 {
+                        state.time_speed = FAST_FORWARD_SPEED;
+                        state.current_time = None;
+                        time_of_day = get_time_of_day_msec(state.time_speed);
                         show_message!("Fast Forward: ON");
                     } else {
-                        time_speed = 1;
+                        state.time_speed = 1;
                         show_message!("Fast Forward: OFF");
                     }
                 }
                 Some(0x1b) => {
-                    match nb_read_byte(&mut stdin)? {
+                    match nb_read_byte(&mut state.stdin)? {
                         None => return Ok(Action::Quit),
                         Some(0x1b) => return Ok(Action::Quit),
                         Some(b'[') => {
-                            match nb_read_byte(&mut stdin)? {
+                            match nb_read_byte(&mut state.stdin)? {
                                 None => break,
                                 Some(b'A') => {
                                     // Up
@@ -614,13 +620,13 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                                     }
                                 }
                                 Some(b'1') => {
-                                    match nb_read_byte(&mut stdin)? {
+                                    match nb_read_byte(&mut state.stdin)? {
                                         None => break,
                                         Some(b';') => {
-                                            match nb_read_byte(&mut stdin)? {
+                                            match nb_read_byte(&mut state.stdin)? {
                                                 None => break,
                                                 Some(b'5') => {
-                                                    match nb_read_byte(&mut stdin)? {
+                                                    match nb_read_byte(&mut state.stdin)? {
                                                         None => break,
                                                         Some(b'H') => {
                                                             // Ctrl+Home
@@ -644,7 +650,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                                     }
                                 }
                                 Some(b'5') => {
-                                    match nb_read_byte(&mut stdin)? {
+                                    match nb_read_byte(&mut state.stdin)? {
                                         None => break,
                                         Some(b'~') => {
                                             // Page Up
@@ -658,10 +664,10 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                                             }
                                         }
                                         Some(b';') => {
-                                            match nb_read_byte(&mut stdin)? {
+                                            match nb_read_byte(&mut state.stdin)? {
                                                 None => break,
                                                 Some(b'3') => {
-                                                    match nb_read_byte(&mut stdin)? {
+                                                    match nb_read_byte(&mut state.stdin)? {
                                                         None => break,
                                                         Some(b'~') => {
                                                             // Alt+Page Up
@@ -684,7 +690,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                                     }
                                 }
                                 Some(b'6') => {
-                                    match nb_read_byte(&mut stdin)? {
+                                    match nb_read_byte(&mut state.stdin)? {
                                         None => break,
                                         Some(b'~') => {
                                             // Page Down
@@ -698,10 +704,10 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                                             }
                                         }
                                         Some(b';') => {
-                                            match nb_read_byte(&mut stdin)? {
+                                            match nb_read_byte(&mut state.stdin)? {
                                                 None => break,
                                                 Some(b'3') => {
-                                                    match nb_read_byte(&mut stdin)? {
+                                                    match nb_read_byte(&mut state.stdin)? {
                                                         None => break,
                                                         Some(b'~') => {
                                                             // Alt+Page Down
@@ -727,7 +733,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                                     if byte.is_ascii_digit() || byte == b';' {
                                         // eat whole unsupported escape input sequence
                                         loop {
-                                            let Some(byte) = nb_read_byte(&mut stdin)? else {
+                                            let Some(byte) = nb_read_byte(&mut state.stdin)? else {
                                                 break;
                                             };
 
@@ -773,12 +779,12 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                 prev_frame = RgbImage::new(viewport.width(), viewport.height());
                 full_redraw = true;
 
-                //let _ = write!(stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m\x1B[2J");
+                //let _ = write!(state.stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m\x1B[2J");
                 if viewport.width() < term_width || viewport.height() < term_height {
-                    let _ = write!(stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m");
+                    let _ = write!(state.stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m");
 
                     if viewport_y > 0 {
-                        let _ = write!(stdout, "\x1B[{};1H\x1B[1J", viewport_row);
+                        let _ = write!(state.stdout, "\x1B[{};1H\x1B[1J", viewport_row);
                     }
 
                     let viewport_rows = (viewport.height() + 1) / 2;
@@ -786,19 +792,19 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                     if viewport_x > 0 {
                         let column = viewport_column - 1;
                         for row in viewport_row..viewport_end_row {
-                            let _ = write!(stdout, "\x1B[{};{}H\x1B[1K", row, column);
+                            let _ = write!(state.stdout, "\x1B[{};{}H\x1B[1K", row, column);
                         }
                     }
 
                     if viewport_x + viewport.width() < term_width {
                         let viewport_end_column = viewport_column + viewport.width();
                         for row in viewport_row..viewport_end_row {
-                            let _ = write!(stdout, "\x1B[{};{}H\x1B[0K", row, viewport_end_column);
+                            let _ = write!(state.stdout, "\x1B[{};{}H\x1B[0K", row, viewport_end_column);
                         }
                     }
 
                     if (viewport_y + viewport.height() + 1) / 2 < term_height / 2 {
-                        let _ = write!(stdout, "\x1B[{};1H\x1B[0J", viewport_end_row);
+                        let _ = write!(state.stdout, "\x1B[{};1H\x1B[0J", viewport_end_row);
                     }
                 }
             }
@@ -856,12 +862,12 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
 
         std::mem::swap(&mut frame, &mut prev_frame);
 
-        let _ = write!(stdout, "\x1B[{};{}H{linebuf}", viewport_row, viewport_column);
+        let _ = write!(state.stdout, "\x1B[{};{}H{linebuf}", viewport_row, viewport_column);
 
         old_term_width  = term_width;
         old_term_height = term_height;
 
-        if time_speed != 1 && message.is_empty() {
+        if state.time_speed != 1 && message.is_empty() {
             let (hours, mins) = get_hours_mins(time_of_day);
             show_message!("{hours}:{mins:02}");
         }
@@ -884,7 +890,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                     &message
                 };
 
-                let _ = write!(stdout,
+                let _ = write!(state.stdout,
                     "\x1B[{};{}H\x1B[38;2;255;255;255m\x1B[48;2;0;0;0m{}",
                     term_height, column, message);
                 message_shown = true;
@@ -896,7 +902,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
             message_shown = false;
         }
 
-        let _ = stdout.flush();
+        let _ = state.stdout.flush();
 
         // sleep for rest of frame
         let elapsed = frame_start_ts.elapsed();
