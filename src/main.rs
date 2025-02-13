@@ -296,10 +296,10 @@ enum Action {
     Quit,
 }
 
-fn get_today_seconds() -> u32 {
+fn get_today_seconds(time_speed: u32) -> u32 {
     #[cfg(not(windows))]
     unsafe {
-        let time = libc::time(std::ptr::null_mut());
+        let time = libc::time(std::ptr::null_mut()) * time_speed as libc::time_t;
         let mut tm = MaybeUninit::<libc::tm>::zeroed();
         if libc::localtime_r(&time, tm.as_mut_ptr()).is_null() {
             return 0;
@@ -379,6 +379,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
     } else {
         None
     };
+    let mut time_speed: u32 = 1;
 
     let mut frame = RgbImage::new(viewport.width(), viewport.height());
     let mut prev_frame = RgbImage::new(viewport.width(), viewport.height());
@@ -412,7 +413,7 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
         let mut time_of_day = if let Some(current_time) = current_time {
             current_time
         } else {
-            get_today_seconds()
+            get_today_seconds(time_speed)
         };
 
         // process input
@@ -540,10 +541,19 @@ fn show_image(args: &mut Args, file_index: usize) -> std::io::Result<Action> {
                 Some(b's') => {
                     if current_time.is_some() {
                         current_time = None;
-                        time_of_day = get_today_seconds();
+                        time_of_day = get_today_seconds(time_speed);
                     }
                     let (hours, mins) = get_hours_mins(time_of_day);
                     show_message!("{hours}:{mins:02}");
+                }
+                Some(b'f') => {
+                    if time_speed == 1 {
+                        time_speed = 24 * 60;
+                        show_message!("Fast Forward: ON");
+                    } else {
+                        time_speed = 1;
+                        show_message!("Fast Forward: OFF");
+                    }
                 }
                 Some(0x1b) => {
                     match nb_read_byte(&mut stdin)? {
