@@ -12,6 +12,9 @@ files (only the background layer) or JSON files similar to what the
 [Canvas Cycle](https://experiments.withgoogle.com/canvas-cycle) demo
 by Joseph Huckaby uses.
 
+Short demo video:
+[![Preview screenshot of short demo video](https://i3.ytimg.com/vi/Fdk7anwM7f0/maxresdefault.jpg)](https://www.youtube.com/watch?v=Fdk7anwM7f0)
+
 ## Usage
 
 ```
