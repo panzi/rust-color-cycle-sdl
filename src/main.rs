@@ -21,8 +21,6 @@ pub mod read;
 
 use std::fmt::Debug;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::fs::File;
 use std::io::BufReader;
@@ -101,6 +99,15 @@ pub struct Args {
     #[arg(short, long, default_value_t = false)]
     pub full_screen: bool,
 
+    /// Cover the window with the animation.
+    /// 
+    /// Per default the animation will be contained, leading to black bars if
+    /// the window doesn't have the same aspect ratio as the animation. With
+    /// this option the animation is zoomed in so that it will cover the window
+    /// and will crop out parts of the animation.
+    #[arg(short, long, default_value_t = false)]
+    pub cover: bool,
+
     /// Show list of hotkeys.
     #[arg(long, default_value_t = false)]
     pub help_hotkeys: bool,
@@ -121,6 +128,7 @@ B              Toggle blend mode
 Q              Quit program
 Escape         Close full-screen or quit program
 O              Toggle On Screen Display
+C              Toggle zoom to cover/contain
 N              Open next file
 P              Open previous file
 1 to 9         Open file by index
@@ -140,6 +148,7 @@ S              Go to current time and continue normal progression.");
         blend: args.blend,
         osd: args.osd,
         full_screen: args.full_screen,
+        cover: args.cover,
         paths: args.paths,
         ttf: &match sdl2::ttf::init() {
             Ok(ttf) => ttf,
@@ -151,7 +160,7 @@ S              Go to current time and continue normal progression.");
     }) {
         Ok(mut viewer) => {
             if let Err(err) = viewer.run() {
-                eprintln!("{}: {}", viewer.paths[viewer.file_index].to_string_lossy(), err);
+                eprintln!("{}: {}", viewer.options.paths[viewer.file_index].to_string_lossy(), err);
                 std::process::exit(1);
             }
         }
@@ -168,23 +177,19 @@ struct ColorCycleViewerOptions<'font> {
     osd: bool,
     paths: Vec<PathBuf>,
     full_screen: bool,
+    cover: bool,
     ttf: &'font sdl2::ttf::Sdl2TtfContext,
 }
 
 struct ColorCycleViewer<'font> {
-    fps: u32,
-    blend: bool,
-    osd: bool,
-    paths: Vec<PathBuf>,
+    options: ColorCycleViewerOptions<'font>,
     file_index: usize,
-    running: Arc<AtomicBool>,
     current_time: Option<u64>,
     time_speed: u64,
     was_resized: bool,
 
     #[allow(unused)]
     sdl: sdl2::Sdl,
-    ttf: &'font sdl2::ttf::Sdl2TtfContext,
     font: Option<sdl2::ttf::Font<'font, 'static>>,
     font_size: u16,
     #[allow(unused)]
@@ -216,18 +221,13 @@ impl<'font> ColorCycleViewer<'font> {
             .map_err(|err| err.to_string())?;
 
         Ok(ColorCycleViewer {
-            fps: options.fps,
-            blend: options.blend,
-            osd: options.osd,
-            paths: options.paths,
-            running: Arc::new(AtomicBool::new(true)),
+            options,
             current_time: None,
             time_speed: 1,
             file_index: 0,
 
             was_resized: false,
             sdl,
-            ttf: options.ttf,
             font: None,
             font_size: 0,
             video,
@@ -237,13 +237,6 @@ impl<'font> ColorCycleViewer<'font> {
     }
 
     pub fn run(&mut self) -> Result<(), String> {
-        {
-            let running = self.running.clone();
-            let _ = ctrlc::set_handler(move || {
-                running.store(false, Ordering::Relaxed);
-            });
-        }
-
         loop {
             match self.show_image() {
                 Ok(Action::Goto(index)) => {
@@ -260,7 +253,7 @@ impl<'font> ColorCycleViewer<'font> {
     }
 
     fn show_image(&mut self) -> Result<Action, String> {
-        let path = &self.paths[self.file_index];
+        let path = &self.options.paths[self.file_index];
         let file = File::open(path).map_err(|err| err.to_string())?;
         let reader = BufReader::new(file);
 
@@ -271,7 +264,7 @@ impl<'font> ColorCycleViewer<'font> {
         let mut cycled_palette1 = blended_palette.clone();
         let mut cycled_palette2 = blended_palette.clone();
 
-        let mut frame_duration = Duration::from_secs_f64(1.0 / (self.fps as f64));
+        let mut frame_duration = Duration::from_secs_f64(1.0 / (self.options.fps as f64));
 
         let img_width = cycle_image.width();
         let img_height = cycle_image.height();
@@ -316,7 +309,7 @@ impl<'font> ColorCycleViewer<'font> {
         self.canvas.set_integer_scale(true).log_error("canvas.set_integer_scale(true)");
 
         let loop_start_ts = Instant::now();
-        let mut message_end_ts = if self.osd {
+        let mut message_end_ts = if self.options.osd {
             message.push_str(" ");
             message.push_str(&filename);
             message.push_str(" ");
@@ -326,7 +319,7 @@ impl<'font> ColorCycleViewer<'font> {
             loop_start_ts
         };
 
-        while self.running.load(Ordering::Relaxed) {
+        loop {
             let frame_start_ts = Instant::now();
             let mut time_of_day = if let Some(current_time) = self.current_time {
                 current_time
@@ -336,7 +329,7 @@ impl<'font> ColorCycleViewer<'font> {
 
             macro_rules! show_message {
                 ($($args:expr),+) => {
-                    if self.osd {
+                    if self.options.osd {
                         message_end_ts = frame_start_ts + message_display_duration;
                         message.clear();
                         use std::fmt::Write;
@@ -360,7 +353,9 @@ impl<'font> ColorCycleViewer<'font> {
                             _ => {}
                         }
                     }
-                    Event::Quit { .. } => return Ok(Action::Quit),
+                    Event::Quit { .. } => {
+                        return Ok(Action::Quit);
+                    }
                     Event::KeyDown { keycode, .. } => {
                         if let Some(keycode) = keycode {
                             match keycode {
@@ -377,42 +372,52 @@ impl<'font> ColorCycleViewer<'font> {
                                 }
                                 Keycode::B => {
                                     // toggle blend mode
-                                    self.blend = !self.blend;
+                                    self.options.blend = !self.options.blend;
 
-                                    show_message!("Blend Mode: {}", if self.blend { "Enabled" } else { "Disabled" });
+                                    show_message!("Blend Mode: {}", if self.options.blend { "Enabled" } else { "Disabled" });
+                                }
+                                Keycode::C => {
+                                    // toggle cover/contain
+                                    self.options.cover = !self.options.cover;
+
+                                    if self.options.cover {
+                                        show_message!("Zoom to cover");
+                                    } else {
+                                        show_message!("Zoom to contain");
+                                    }
                                 }
                                 Keycode::O => {
                                     // toggle OSD
-                                    if self.osd {
+                                    if self.options.osd {
                                         show_message!("OSD: Disabled");
-                                        self.osd = false;
+                                        self.options.osd = false;
                                     } else {
-                                        self.osd = true;
+                                        self.options.osd = true;
                                         show_message!("OSD: Enabled");
                                     }
                                 }
                                 Keycode::PLUS | Keycode::KP_PLUS => {
                                     // increase FPS
-                                    if self.fps < MAX_FPS {
-                                        self.fps += 1;
-                                        frame_duration = Duration::from_secs_f64(1.0 / self.fps as f64);
+                                    if self.options.fps < MAX_FPS {
+                                        self.options.fps += 1;
+                                        frame_duration = Duration::from_secs_f64(1.0 / self.options.fps as f64);
 
-                                        show_message!("FPS: {}", self.fps);
+                                        show_message!("FPS: {}", self.options.fps);
                                     }
                                 }
                                 Keycode::MINUS | Keycode::KP_MINUS => {
                                     // decrease FPS
-                                    if self.fps > 1 {
-                                        self.fps -= 1;
-                                        frame_duration = Duration::from_secs_f64(1.0 / self.fps as f64);
+                                    if self.options.fps > 1 {
+                                        self.options.fps -= 1;
+                                        frame_duration = Duration::from_secs_f64(1.0 / self.options.fps as f64);
 
-                                        show_message!("FPS: {}", self.fps);
+                                        show_message!("FPS: {}", self.options.fps);
                                     }
                                 }
                                 Keycode::N => {
                                     // next file
                                     let new_index = self.file_index + 1;
-                                    if new_index >= self.paths.len() {
+                                    if new_index >= self.options.paths.len() {
                                         show_message!("Already at last file.");
                                     } else {
                                         return Ok(Action::Goto(new_index));
@@ -489,7 +494,7 @@ impl<'font> ColorCycleViewer<'font> {
                                     }
                                 }
                                 Keycode::KP_0 | Keycode::NUM_0 => {
-                                    return Ok(Action::Goto(self.paths.len() - 1));
+                                    return Ok(Action::Goto(self.options.paths.len() - 1));
                                 }
                                 Keycode::KP_1 | Keycode::NUM_1 => {
                                     return Ok(Action::Goto(0));
@@ -504,8 +509,8 @@ impl<'font> ColorCycleViewer<'font> {
                                     };
 
                                     if index > 0 {
-                                        if index as usize >= self.paths.len() {
-                                            show_message!("Only {} files opened!", self.paths.len());
+                                        if index as usize >= self.options.paths.len() {
+                                            show_message!("Only {} files opened!", self.options.paths.len());
                                         } else {
                                             return Ok(Action::Goto(index as usize));
                                         }
@@ -551,14 +556,14 @@ impl<'font> ColorCycleViewer<'font> {
                 let time_in_span = time_of_day - prev_time_of_day;
                 let blend_palettes = time_in_span as f64 / current_span as f64;
 
-                cycled_palette1.apply_cycles_from(palette1.palette(), palette1.cycles(), blend_cycle, self.blend);
-                cycled_palette2.apply_cycles_from(palette2.palette(), palette2.cycles(), blend_cycle, self.blend);
+                cycled_palette1.apply_cycles_from(palette1.palette(), palette1.cycles(), blend_cycle, self.options.blend);
+                cycled_palette2.apply_cycles_from(palette2.palette(), palette2.cycles(), blend_cycle, self.options.blend);
 
                 crate::palette::blend(&cycled_palette1, &cycled_palette2, blend_palettes, &mut blended_palette);
 
                 palette = &blended_palette;
             } else {
-                cycled_palette1.apply_cycles_from(&blended_palette, cycle_image.cycles(), blend_cycle, self.blend);
+                cycled_palette1.apply_cycles_from(&blended_palette, cycle_image.cycles(), blend_cycle, self.options.blend);
                 palette = &cycled_palette1;
             }
 
@@ -580,21 +585,41 @@ impl<'font> ColorCycleViewer<'font> {
             self.canvas.clear();
             let (canvas_width, canvas_height) = self.canvas.output_size()?;
 
-            let mut draw_width = canvas_width;
-            let mut draw_height = img_height * canvas_width / img_width;
+            let mut draw_width;
+            let mut draw_height;
+            let draw_x;
+            let draw_y;
 
-            if draw_height > canvas_height {
-                draw_width = img_width * canvas_height / img_height;
-                draw_height = canvas_height;
+            draw_width = canvas_width;
+            draw_height = img_height * canvas_width / img_width;
+
+            if self.options.cover {
+                if draw_height < canvas_height {
+                    draw_width = img_width * canvas_height / img_height;
+                    draw_height = canvas_height;
+                }
+
+                draw_x = if draw_width > canvas_width {
+                    -(((draw_width - canvas_width) / 2) as i32)
+                } else { 0 };
+
+                draw_y = if draw_height > canvas_height {
+                    -(((draw_height - canvas_height) / 2) as i32)
+                } else { 0 };
+            } else {
+                if draw_height > canvas_height {
+                    draw_width = img_width * canvas_height / img_height;
+                    draw_height = canvas_height;
+                }
+
+                draw_x = if draw_width < canvas_width {
+                    ((canvas_width - draw_width) / 2) as i32
+                } else { 0 };
+
+                draw_y = if draw_height < canvas_height {
+                    ((canvas_height - draw_height) / 2) as i32
+                } else { 0 };
             }
-
-            let draw_x = if draw_width < canvas_width {
-                ((canvas_width - draw_width) / 2) as i32
-            } else { 0 };
-
-            let draw_y = if draw_height < canvas_height {
-                ((canvas_height - draw_height) / 2) as i32
-            } else { 0 };
 
             self.canvas.copy(&texture, None, Rect::new(draw_x, draw_y, draw_width, draw_height))?;
 
@@ -617,7 +642,7 @@ impl<'font> ColorCycleViewer<'font> {
                     let font = if let Some(font) = &self.font {
                         font
                     } else {
-                        self.font = Some(self.ttf.load_font_from_rwops(RWops::from_bytes(HACK_FONT)?, new_font_size)?);
+                        self.font = Some(self.options.ttf.load_font_from_rwops(RWops::from_bytes(HACK_FONT)?, new_font_size)?);
                         self.font_size = new_font_size;
                         self.font.as_ref().unwrap()
                     };
@@ -649,8 +674,6 @@ impl<'font> ColorCycleViewer<'font> {
                 return Ok(Action::Quit);
             }
         }
-
-        Ok(Action::Quit)
     }
 }
 

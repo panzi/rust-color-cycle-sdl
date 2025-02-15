@@ -30,7 +30,7 @@ Options:
 
           Attempt to render in this number of frames per second. Actual FPS might be lower.
 
-          [default: 25]
+          [default: 60]
 
   -b, --blend
           Enable blend mode.
@@ -45,6 +45,14 @@ Options:
 
   -f, --full-screen
           Start in fullscreen
+
+  -c, --cover
+          Cover the window with the animation.
+
+          Per default the animation will be contained, leading to black bars if the window
+          doesn't have the same aspect ratio as the animation. With this option the
+          animation is zoomed in so that it will cover the window and will crop out parts
+          of the animation.
 
       --help-hotkeys
           Show list of hotkeys
@@ -64,6 +72,7 @@ Options:
 | `Q` | Quit program |
 | `Escape` | Close full-screen or quit program |
 | `O` | Toggle On Screen Display |
+| `C` | Toggle zoom to cover/contain |
 | `N` | Open next file |
 | `P` | Open previous file |
 | `1` to `9` | Open file by index |
