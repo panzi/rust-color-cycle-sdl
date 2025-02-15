@@ -22,14 +22,7 @@ use crate::palette::Palette;
 pub struct RgbImage {
     width: u32,
     height: u32,
-    data: Box<[Rgb]>,
-}
-
-impl From<RgbImage> for Box<[Rgb]> {
-    #[inline]
-    fn from(value: RgbImage) -> Self {
-        value.data
-    }
+    data: Box<[u8]>,
 }
 
 impl RgbImage {
@@ -37,20 +30,21 @@ impl RgbImage {
         Self {
             width,
             height,
-            data: vec![Rgb::default(); width as usize * height as usize].into(),
+            data: vec![0; width as usize * height as usize * 3].into(),
         }
     }
 
     pub fn from_color(width: u32, height: u32, color: Rgb) -> Self {
+        let Rgb([r, g, b]) = color;
         Self {
             width,
             height,
-            data: vec![color; width as usize * height as usize].into(),
+            data: [r, g, b].repeat(width as usize * height as usize).into(),
         }
     }
 
-    pub fn from_buffer(width: u32, height: u32, image: &[Rgb]) -> Option<Self> {
-        let size = width as usize * height as usize;
+    pub fn from_buffer(width: u32, height: u32, image: &[u8]) -> Option<Self> {
+        let size = width as usize * height as usize * 3;
         if image.len() < size {
             return None;
         }
@@ -63,17 +57,20 @@ impl RgbImage {
     }
 
     pub fn from_indexed_image(indexed_image: &IndexedImage) -> Self {
-        let mut data = unsafe { Box::new_uninit_slice(indexed_image.data().len()).assume_init() };
+        let mut data = Vec::with_capacity(indexed_image.data().len() * 3);
         let palette = indexed_image.palette();
 
-        for (index, pixel) in indexed_image.data().iter().cloned().zip(data.iter_mut()) {
-            *pixel = palette[index];
+        for index in indexed_image.data().iter().cloned() {
+            let Rgb([r, g, b]) = palette[index];
+            data.push(r);
+            data.push(g);
+            data.push(b);
         }
 
         Self {
             width: indexed_image.width(),
             height: indexed_image.height(),
-            data,
+            data: data.into(),
         }
     }
 
@@ -93,90 +90,47 @@ impl RgbImage {
     }
 
     #[inline]
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    #[inline]
     pub fn get_pixel(&self, x: u32, y: u32) -> Rgb {
-        let offset = self.width as usize * y as usize + x as usize;
-        self.data[offset]
+        let offset = (self.width as usize * y as usize + x as usize) * 3;
+        let r = self.data[offset];
+        let g = self.data[offset + 1];
+        let b = self.data[offset + 2];
+        Rgb([r, g, b])
     }
 
     #[inline]
     pub fn set_pixel(&mut self, x: u32, y: u32, color: Rgb) {
-        let offset = self.width as usize * y as usize + x as usize;
-        self.data[offset] = color;
-    }
-
-    #[inline]
-    pub fn fill(&mut self, color: Rgb) {
-        self.data.fill(color);
+        let offset = (self.width as usize * y as usize + x as usize) * 3;
+        let Rgb([r, g, b]) = color;
+        self.data[offset] = r;
+        self.data[offset + 1] = g;
+        self.data[offset + 2] = b;
     }
 
     pub fn draw_indexed_image(&mut self, indexed_image: &IndexedImage) {
         let palette = indexed_image.palette();
-        for (index, pixel) in indexed_image.data().iter().cloned().zip(self.data.iter_mut()) {
-            *pixel = palette[index];
+
+        let mut pixel_iter = self.data.iter_mut();
+        for index in indexed_image.data().iter().cloned() {
+            let Rgb([r, g, b]) = palette[index];
+            *pixel_iter.next().unwrap() = r;
+            *pixel_iter.next().unwrap() = g;
+            *pixel_iter.next().unwrap() = b;
         }
     }
 
     pub fn draw_indexed_image_with_palette(&mut self, indexed_image: &IndexedImage, palette: &Palette) {
-        for (index, pixel) in indexed_image.data().iter().cloned().zip(self.data.iter_mut()) {
-            *pixel = palette[index];
+        let mut pixel_iter = self.data.iter_mut();
+        for index in indexed_image.data().iter().cloned() {
+            let Rgb([r, g, b]) = palette[index];
+            *pixel_iter.next().unwrap() = r;
+            *pixel_iter.next().unwrap() = g;
+            *pixel_iter.next().unwrap() = b;
         }
-    }
-
-    pub fn get_rect_data(&self, x: u32, y: u32, width: u32, height: u32) -> Box<[Rgb]> {
-        if x >= self.width || y >= self.height {
-            return Box::new([]);
-        }
-
-        let width = width.min(self.width - x);
-        let height = height.min(self.height - y);
-        let size = width as usize * height as usize;
-
-        let mut data = unsafe { Box::new_uninit_slice(size).assume_init() };
-
-        for new_y in 0..height {
-            let old_offset = (y + new_y) as usize * self.width as usize + x as usize;
-            let new_offset = new_y as usize * width as usize;
-            data[new_offset..new_offset + width as usize].copy_from_slice(&self.data[old_offset..old_offset + width as usize]);
-        }
-
-        data
-    }
-
-    #[inline]
-    pub fn get_rect(&self, x: u32, y: u32, width: u32, height: u32) -> Self {
-        Self {
-            width,
-            height,
-            data: self.get_rect_data(x, y, width, height),
-        }
-    }
-
-    #[inline]
-    pub fn get_rect_from(&mut self, x: u32, y: u32, width: u32, height: u32, other: &RgbImage) {
-        let width = width.min(other.width - x);
-        let height = height.min(other.height - y);
-        self.width = width;
-        self.height = height;
-        self.data = other.get_rect_data(x, y, width, height);
-    }
-
-    pub fn resize(&mut self, width: u32, height: u32, color: Rgb) {
-        if width == self.width && height == self.height {
-            return;
-        }
-
-        let size = width as usize * height as usize;
-        let mut data: Box<[Rgb]> = vec![color; size].into();
-
-        for new_y in 0..height.min(self.height) {
-            let old_offset = new_y as usize * self.width as usize;
-            let new_offset = new_y as usize * width as usize;
-            let copy_width = width.min(self.width);
-            data[new_offset..new_offset + copy_width as usize].copy_from_slice(&self.data[old_offset..old_offset + copy_width as usize]);
-        }
-
-        self.width = width;
-        self.height = height;
-        self.data = data;
     }
 }

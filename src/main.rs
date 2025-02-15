@@ -14,25 +14,30 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-pub mod image_to_ansi;
 pub mod color;
 pub mod image;
 pub mod palette;
 pub mod read;
 
+use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::fs::File;
-use std::io::{BufReader, Read, StdinLock, StdoutLock, Write};
+use std::io::BufReader;
+
+use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
+use sdl2::pixels::{Color, PixelFormatEnum};
+use sdl2::rect::Rect;
+use sdl2::video::{FullscreenType, WindowPos};
 
 #[cfg(not(windows))]
 use std::mem::MaybeUninit;
 
 use clap::Parser;
-use image::{CycleImage, LivingWorld, RgbImage};
-use image_to_ansi::{image_to_ansi_into, simple_image_to_ansi_into};
+use image::{LivingWorld, RgbImage};
 
 #[cfg(not(windows))]
 use libc;
@@ -41,103 +46,6 @@ const MAX_FPS: u32 = 10_000;
 const TIME_STEP: u64 = 60 * 5 * 1000;
 const DAY_DURATION: u64 = 24 * 60 * 60 * 1000;
 const FAST_FORWARD_SPEED: u64 = 10_000;
-
-pub struct NBTerm;
-
-impl NBTerm {
-    pub fn new() -> std::io::Result<Self> {
-        #[cfg(not(windows))]
-        unsafe {
-            let mut ttystate = MaybeUninit::<libc::termios>::zeroed();
-            let res = libc::tcgetattr(libc::STDIN_FILENO, ttystate.as_mut_ptr());
-            if res == -1 {
-                let err = std::io::Error::last_os_error();
-                return Err(err);
-            }
-
-            let ttystate = ttystate.assume_init_mut();
-
-            // turn off canonical mode
-            ttystate.c_lflag &= !(libc::ICANON | libc::ECHO);
-
-            // minimum of number input read.
-            ttystate.c_cc[libc::VMIN] = 0;
-            ttystate.c_cc[libc::VTIME] = 0;
-
-            let res = libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, ttystate);
-            if res == -1 {
-                let err = std::io::Error::last_os_error();
-                return Err(err);
-            }
-        }
-
-//        #[cfg(windows)]
-//        unsafe {
-//            use winapi::shared::minwindef::{DWORD, FALSE};
-//
-//            let handle = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_INPUT_HANDLE);
-//            if handle == winapi::um::handleapi::INVALID_HANDLE_VALUE {
-//                let err = std::io::Error::last_os_error();
-//                return Err(err);
-//            }
-//
-//            let mut mode: DWORD = 0;
-//
-//            if winapi::um::consoleapi::GetConsoleMode(handle, &mut mode as *mut DWORD) == FALSE {
-//                let err = std::io::Error::last_os_error();
-//                return Err(err);
-//            }
-//
-//            if winapi::um::consoleapi::SetConsoleMode(handle, mode & !(winapi::um::wincon::ENABLE_ECHO_INPUT | winapi::um::wincon::ENABLE_LINE_INPUT)) == FALSE {
-//                let err = std::io::Error::last_os_error();
-//                return Err(err);
-//            }
-//        }
-
-        // CSI ?  7 l     No Auto-Wrap Mode (DECAWM), VT100.
-        // CSI ? 25 l     Hide cursor (DECTCEM), VT220
-        // CSI 2 J        Clear entire screen
-        print!("\x1B[?25l\x1B[?7l\x1B[2J");
-
-        Ok(Self)
-    }
-}
-
-impl Drop for NBTerm {
-    fn drop(&mut self) {
-        #[cfg(not(windows))]
-        unsafe {
-            let mut ttystate = MaybeUninit::<libc::termios>::zeroed();
-            let res = libc::tcgetattr(libc::STDIN_FILENO, ttystate.as_mut_ptr());
-            if res == 0 {
-                let ttystate = ttystate.assume_init_mut();
-
-                // turn on canonical mode
-                ttystate.c_lflag |= libc::ICANON | libc::ECHO;
-
-                let _ = libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, ttystate);
-            }
-        }
-
-//        #[cfg(windows)]
-//        unsafe {
-//            use winapi::shared::minwindef::{DWORD, FALSE};
-//            let handle = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_INPUT_HANDLE);
-//            if handle != winapi::um::handleapi::INVALID_HANDLE_VALUE {
-//                let mut mode: DWORD = 0;
-//
-//                if winapi::um::consoleapi::GetConsoleMode(handle, &mut mode as *mut DWORD) != FALSE {
-//                    winapi::um::consoleapi::SetConsoleMode(handle, mode | winapi::um::wincon::ENABLE_ECHO_INPUT | winapi::um::wincon::ENABLE_LINE_INPUT);
-//                }
-//            }
-//        }
-
-        // CSI 0 m        Reset or normal, all attributes become turned off
-        // CSI ?  7 h     Auto-Wrap Mode (DECAWM), VT100
-        // CSI ? 25 h     Show cursor (DECTCEM), VT220
-        println!("\x1B[0m\x1B[?25h\x1B[?7h");
-    }
-}
 
 fn interruptable_sleep(duration: Duration) -> bool {
     #[cfg(unix)]
@@ -154,49 +62,6 @@ fn interruptable_sleep(duration: Duration) -> bool {
     {
         std::thread::sleep(duration);
         return true;
-    }
-}
-
-#[cfg(windows)]
-extern {
-    fn _getch() -> core::ffi::c_char;
-    fn _kbhit() -> core::ffi::c_int;
-}
-
-#[cfg(windows)]
-fn nb_read_byte(mut _reader: impl Read) -> std::io::Result<Option<u8>> {
-    unsafe {
-        if _kbhit() == 0 {
-            return Ok(None);
-        }
-
-        let ch = _getch();
-        Ok(Some(ch as u8))
-    }
-}
-
-#[cfg(not(windows))]
-fn nb_read_byte(mut reader: impl Read) -> std::io::Result<Option<u8>> {
-    let mut buf = [0u8];
-    loop {
-        return match reader.read(&mut buf) {
-            Err(err) => {
-                match err.kind() {
-                    std::io::ErrorKind::WouldBlock => Ok(None),
-
-                    #[cfg(not(windows))]
-                    std::io::ErrorKind::Other if err.raw_os_error() == Some(libc::EAGAIN) => Ok(None),
-
-                    std::io::ErrorKind::Interrupted => continue,
-                    _ => Err(err)
-                }
-            }
-            Ok(count) => if count == 0 {
-                Ok(None)
-            } else {
-                Ok(Some(buf[0]))
-            }
-        };
     }
 }
 
@@ -235,16 +100,8 @@ pub struct Args {
     pub paths: Vec<PathBuf>,
 }
 
-struct GlobalState {
-    running: Arc<AtomicBool>,
-    current_time: Option<u64>,
-    time_speed: u64,
-    stdin: StdinLock<'static>,
-    stdout: StdoutLock<'static>,
-}
-
 fn main() {
-    let mut args = Args::parse();
+    let args = Args::parse();
 
     if args.help_hotkeys {
         println!("\
@@ -259,7 +116,8 @@ P              Open previous file
 0              Open last file
 +              Increase frames per second by 1
 -              Decrease frames per second by 1
-F              Toogle fast forward ({FAST_FORWARD_SPEED}x speed).
+F              Toggle full-screen
+W              Toogle fast forward ({FAST_FORWARD_SPEED}x speed).
 A              Go back in time by 5 minutes.
 D              Go forward in time by 5 minutes.
 S              Go to current time and continue normal progression.
@@ -278,45 +136,426 @@ Alt+Page Down  Move view-port right by half a screen");
         return;
     }
 
-    let mut state = GlobalState {
-        running: Arc::new(AtomicBool::new(true)),
-        stdin: std::io::stdin().lock(),
-        stdout: std::io::stdout().lock(),
-        current_time: None,
-        time_speed: 1,
-    };
-
-    {
-        let running = state.running.clone();
-        let _ = ctrlc::set_handler(move || {
-            running.store(false, Ordering::Relaxed);
-        });
-    }
-
-    let mut file_index = 0;
-
-    let res = match NBTerm::new() {
-        Err(err) => Err(err),
-        Ok(_nbterm) => {
-            loop {
-                match show_image(&mut args, &mut state, file_index) {
-                    Ok(Action::Goto(index)) => {
-                        file_index = index;
-                    }
-                    Ok(Action::Quit) => {
-                        break Ok(());
-                    }
-                    Err(err) => {
-                        break Err(err);
-                    }
-                }
+    match ColorCycleViewer::new(ColorCycleViewerOptions {
+        fps: args.fps,
+        blend: args.blend,
+        osd: args.osd,
+        paths: args.paths,
+    }) {
+        Ok(mut viewer) => {
+            if let Err(err) = viewer.run() {
+                eprintln!("{}: {}", viewer.paths[viewer.file_index].to_string_lossy(), err);
+                std::process::exit(1);
             }
         }
-    };
+        Err(err) => {
+            eprintln!("{}", err);
+            std::process::exit(1);
 
-    if let Err(err) = res {
-        eprintln!("{}: {}", args.paths[file_index].to_string_lossy(), err);
-        std::process::exit(1);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct ColorCycleViewerOptions {
+    fps: u32,
+    blend: bool,
+    osd: bool,
+    paths: Vec<PathBuf>,
+}
+
+struct ColorCycleViewer {
+    fps: u32,
+    blend: bool,
+    osd: bool,
+    paths: Vec<PathBuf>,
+    file_index: usize,
+    running: Arc<AtomicBool>,
+    current_time: Option<u64>,
+    time_speed: u64,
+
+    #[allow(unused)]
+    sdl: sdl2::Sdl,
+    #[allow(unused)]
+    video: sdl2::VideoSubsystem,
+    canvas: sdl2::render::WindowCanvas,
+    event_pump: sdl2::EventPump,
+}
+
+impl ColorCycleViewer {
+    pub fn new(options: ColorCycleViewerOptions) -> Result<ColorCycleViewer, String> {
+        let sdl = sdl2::init()?;
+        let video = sdl.video()?;
+        let window = video
+            .window("Color Cycle Viewer", 640, 480)
+            .position_centered()
+            .resizable()
+            .build()
+            .map_err(|err| err.to_string())?;
+        let event_pump = sdl.event_pump()?;
+
+        sdl.mouse().show_cursor(false);
+
+        let canvas = window.into_canvas()
+            .accelerated()
+            .build()
+            .map_err(|err| err.to_string())?;
+
+        Ok(ColorCycleViewer {
+            fps: options.fps,
+            blend: options.blend,
+            osd: options.osd,
+            paths: options.paths,
+            running: Arc::new(AtomicBool::new(true)),
+            current_time: None,
+            time_speed: 1,
+            file_index: 0,
+
+            sdl,
+            video,
+            canvas,
+            event_pump,
+        })
+    }
+
+    pub fn run(&mut self) -> Result<(), String> {
+        {
+            let running = self.running.clone();
+            let _ = ctrlc::set_handler(move || {
+                running.store(false, Ordering::Relaxed);
+            });
+        }
+
+        let mut init = true;
+        loop {
+            match self.show_image(init) {
+                Ok(Action::Goto(index)) => {
+                    self.file_index = index;
+                }
+                Ok(Action::Quit) => {
+                    return Ok(());
+                }
+                Err(err) => {
+                    return Err(err);
+                }
+            }
+            init = false;
+        }
+    }
+
+    fn show_image(&mut self, init: bool) -> Result<Action, String> {
+        let path = &self.paths[self.file_index];
+        let file = File::open(path).map_err(|err| err.to_string())?;
+        let reader = BufReader::new(file);
+
+        let living_world: LivingWorld = serde_json::from_reader(reader).map_err(|err| err.to_string())?;
+        // TODO: implement full worlds demo support
+        let cycle_image = living_world.base();
+        let mut blended_palette = cycle_image.palette().clone();
+        let mut cycled_palette1 = blended_palette.clone();
+        let mut cycled_palette2 = blended_palette.clone();
+
+        let mut frame_duration = Duration::from_secs_f64(1.0 / (self.fps as f64));
+
+        let img_width = cycle_image.width();
+        let img_height = cycle_image.height();
+        let pitch = img_width as usize * 3;
+
+        let mut frame = RgbImage::new(img_width, img_height);
+
+        let texture_creator = self.canvas.texture_creator();
+        let mut texture = texture_creator.create_texture(
+            PixelFormatEnum::RGB24,
+            sdl2::render::TextureAccess::Streaming,
+            img_width, img_height
+        ).map_err(|err| err.to_string())?;
+
+        let filename = path.file_name().map(|f| f.to_string_lossy()).unwrap_or_else(|| path.to_string_lossy());
+        self.canvas.window_mut().set_title(&format!("{filename} - Canvas Cycle Viewer")).log_error("window.set_title()");
+
+        if init && self.canvas.window().fullscreen_state() == FullscreenType::Off {
+            self.canvas.window_mut().set_size(img_width, img_height).log_error("window.set_size()");
+            self.canvas.window_mut().set_position(WindowPos::Centered, WindowPos::Centered);
+        }
+
+        let mut message = String::new();
+        let message_display_duration = Duration::from_secs(3);
+
+        self.canvas.set_draw_color(Color::RGBA(0, 0, 0, 255));
+        self.canvas.set_integer_scale(true).log_error("canvas.set_integer_scale(true)");
+
+        let loop_start_ts = Instant::now();
+        let mut message_end_ts = if self.osd {
+            message.push_str(&filename);
+            println!("{message}");
+            loop_start_ts + message_display_duration
+        } else {
+            loop_start_ts
+        };
+
+        while self.running.load(Ordering::Relaxed) {
+            let frame_start_ts = Instant::now();
+            let mut time_of_day = if let Some(current_time) = self.current_time {
+                current_time
+            } else {
+                get_time_of_day_msec(self.time_speed)
+            };
+
+            macro_rules! show_message {
+                ($($args:expr),+) => {
+                    if self.osd {
+                        message_end_ts = frame_start_ts + message_display_duration;
+                        message.clear();
+                        use std::fmt::Write;
+                        let _ = write!(&mut message, $($args),+);
+                        println!("{message}");
+                    }
+                };
+            }
+
+            // process input
+            for event in self.event_pump.poll_iter() {
+                match event {
+                    Event::Quit { .. } => return Ok(Action::Quit),
+                    Event::KeyDown { timestamp: _, window_id: _, keycode, scancode: _, keymod: _, repeat: _ } => {
+                        if let Some(keycode) = keycode {
+                            match keycode {
+                                Keycode::Q | Keycode::ESCAPE => {
+                                    // quit
+                                    return Ok(Action::Quit);
+                                }
+                                Keycode::B => {
+                                    // toggle blend mode
+                                    self.blend = !self.blend;
+
+                                    show_message!("Blend Mode: {}", if self.blend { "Enabled" } else { "Disabled" });
+                                }
+                                Keycode::O => {
+                                    // toggle OSD
+                                    if self.osd {
+                                        show_message!("OSD: Disabled");
+                                        self.osd = false;
+                                    } else {
+                                        self.osd = true;
+                                        show_message!("OSD: Enabled");
+                                    }
+                                }
+                                Keycode::PLUS => {
+                                    // increase FPS
+                                    if self.fps < MAX_FPS {
+                                        self.fps += 1;
+                                        frame_duration = Duration::from_secs_f64(1.0 / self.fps as f64);
+
+                                        show_message!("FPS: {}", self.fps);
+                                    }
+                                }
+                                Keycode::MINUS => {
+                                    // decrease FPS
+                                    if self.fps > 1 {
+                                        self.fps -= 1;
+                                        frame_duration = Duration::from_secs_f64(1.0 / self.fps as f64);
+
+                                        show_message!("FPS: {}", self.fps);
+                                    }
+                                }
+                                Keycode::N => {
+                                    // next file
+                                    let new_index = self.file_index + 1;
+                                    if new_index >= self.paths.len() {
+                                        show_message!("Already at last file.");
+                                    } else {
+                                        return Ok(Action::Goto(new_index));
+                                    }
+                                }
+                                Keycode::P => {
+                                    // previous file
+                                    if self.file_index == 0 {
+                                        show_message!("Already at first file.");
+                                    } else {
+                                        return Ok(Action::Goto(self.file_index - 1));
+                                    }
+                                }
+                                Keycode::A => {
+                                    // back in time
+                                    let rem = time_of_day % TIME_STEP;
+                                    let new_time = time_of_day - rem;
+                                    if new_time == time_of_day {
+                                        if new_time < TIME_STEP {
+                                            time_of_day = DAY_DURATION - TIME_STEP;
+                                        } else {
+                                            time_of_day = new_time - TIME_STEP;
+                                        }
+                                    } else {
+                                        time_of_day = new_time;
+                                    }
+                                    self.time_speed = 1;
+                                    self.current_time = Some(time_of_day);
+                                    let (hours, mins) = get_hours_mins(time_of_day);
+                                    show_message!("{hours}:{mins:02}");
+                                }
+                                Keycode::D => {
+                                    // forward in time
+                                    let rem = time_of_day % TIME_STEP;
+                                    let new_time = time_of_day - rem + TIME_STEP;
+                                    if new_time >= DAY_DURATION {
+                                        time_of_day = 0;
+                                    } else {
+                                        time_of_day = new_time;
+                                    }
+                                    self.time_speed = 1;
+                                    self.current_time = Some(time_of_day);
+                                    let (hours, mins) = get_hours_mins(time_of_day);
+                                    show_message!("{hours}:{mins:02}");
+                                }
+                                Keycode::S => {
+                                    // to current time
+                                    if self.current_time.is_some() {
+                                        self.time_speed = 1;
+                                        self.current_time = None;
+                                        time_of_day = get_time_of_day_msec(self.time_speed);
+                                    }
+                                    let (hours, mins) = get_hours_mins(time_of_day);
+                                    show_message!("{hours}:{mins:02}");
+                                }
+                                Keycode::F => {
+                                    // toggle fullscreen
+                                    let window = self.canvas.window_mut();
+                                    let value = match window.fullscreen_state() {
+                                        FullscreenType::Desktop | FullscreenType::True => FullscreenType::Off,
+                                        FullscreenType::Off => FullscreenType::Desktop,
+                                    };
+                                    window.set_fullscreen(value).log_error("window.set_fullscreen()");
+                                }
+                                Keycode::W => {
+                                    // toggle fast forward
+                                    if self.time_speed == 1 {
+                                        self.time_speed = FAST_FORWARD_SPEED;
+                                        self.current_time = None;
+                                        time_of_day = get_time_of_day_msec(self.time_speed);
+                                        show_message!("Fast Forward: ON");
+                                    } else {
+                                        self.time_speed = 1;
+                                        show_message!("Fast Forward: OFF");
+                                    }
+                                }
+                                Keycode::KP_0 | Keycode::NUM_0 => {
+                                    return Ok(Action::Goto(self.paths.len() - 1));
+                                }
+                                Keycode::KP_1 | Keycode::NUM_1 => {
+                                    return Ok(Action::Goto(0));
+                                }
+                                _ => {
+                                    let index = if keycode.into_i32() >= Keycode::KP_2.into_i32() && keycode.into_i32() <= Keycode::KP_9.into_i32() {
+                                        keycode.into_i32() - Keycode::KP_1.into_i32()
+                                    } else if keycode.into_i32() >= Keycode::NUM_2.into_i32() && keycode.into_i32() <= Keycode::NUM_9.into_i32() {
+                                        keycode.into_i32() - Keycode::NUM_1.into_i32()
+                                    } else {
+                                        0
+                                    };
+
+                                    if index > 0 {
+                                        if index as usize >= self.paths.len() {
+                                            show_message!("Only {} files opened!", self.paths.len());
+                                        } else {
+                                            return Ok(Action::Goto(index as usize));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // render frame
+            let blend_cycle = (frame_start_ts - loop_start_ts).as_secs_f64();
+            if !living_world.timeline().is_empty() {
+                let mut palette1 = &living_world.palettes()[living_world.timeline().last().unwrap().palette_index()];
+                let mut palette2 = palette1;
+                let mut prev_time_of_day = 0;
+                let mut next_time_of_day = 0;
+    
+                // TODO: binary search?
+                let mut found = false;
+                for event in living_world.timeline() {
+                    prev_time_of_day = next_time_of_day;
+                    next_time_of_day = event.time_of_day() as u64 * 1000;
+                    palette1 = palette2;
+                    palette2 = &living_world.palettes()[event.palette_index()];
+                    if next_time_of_day > time_of_day {
+                        found = true;
+                        break;
+                    }
+                }
+    
+                if !found {
+                    prev_time_of_day = next_time_of_day;
+                    next_time_of_day = DAY_DURATION;
+                    palette1 = palette2;
+                    palette2 = &living_world.palettes()[living_world.timeline().first().unwrap().palette_index()];
+                }
+    
+                let current_span = next_time_of_day - prev_time_of_day;
+                let time_in_span = time_of_day - prev_time_of_day;
+                let blend_palettes = time_in_span as f64 / current_span as f64;
+    
+                cycled_palette1.apply_cycles_from(palette1.palette(), palette1.cycles(), blend_cycle, self.blend);
+                cycled_palette2.apply_cycles_from(palette2.palette(), palette2.cycles(), blend_cycle, self.blend);
+    
+                crate::palette::blend(&cycled_palette1, &cycled_palette2, blend_palettes, &mut blended_palette);
+    
+                cycle_image.indexed_image().apply_with_palette(&mut frame, &blended_palette);
+            } else {
+                cycled_palette1.apply_cycles_from(&blended_palette, cycle_image.cycles(), blend_cycle, self.blend);
+                cycle_image.indexed_image().apply_with_palette(&mut frame, &cycled_palette1);
+            }
+
+            if let Err(err) = texture.update(Rect::new(0, 0, img_width, img_height), frame.data(), pitch) {
+                return Err(err.to_string());
+            }
+
+            self.canvas.clear();
+            let (canvas_width, canvas_height) = self.canvas.output_size()?;
+
+            let mut draw_width = canvas_width;
+            let mut draw_height = img_height * canvas_width / img_width;
+
+            if draw_height > canvas_height {
+                draw_width = img_width * canvas_height / img_height;
+                draw_height = canvas_height;
+            }
+
+            let draw_x = if draw_width < canvas_width {
+                ((canvas_width - draw_width) / 2) as i32
+            } else { 0 };
+
+            let draw_y = if draw_height < canvas_height {
+                ((canvas_height - draw_height) / 2) as i32
+            } else { 0 };
+
+            self.canvas.copy(&texture, None, Rect::new(draw_x, draw_y, draw_width, draw_height))?;
+
+            if self.time_speed != 1 && message.is_empty() {
+                let (hours, mins) = get_hours_mins(time_of_day);
+                show_message!("{hours}:{mins:02}");
+            }
+
+            if message_end_ts >= frame_start_ts {
+                // TODO: draw OSD
+                
+            }
+
+            self.canvas.present();
+
+            // sleep for rest of frame
+            let elapsed = frame_start_ts.elapsed();
+            if frame_duration > elapsed && !interruptable_sleep(frame_duration - elapsed) {
+                return Ok(Action::Quit);
+            }
+        }
+    
+        Ok(Action::Quit)
     }
 }
 
@@ -360,556 +599,36 @@ fn get_hours_mins(time_of_day: u64) -> (u32, u32) {
     (hours, mins - hours * 60)
 }
 
-fn show_image(args: &mut Args, state: &mut GlobalState, file_index: usize) -> std::io::Result<Action> {
-    let path = &args.paths[file_index];
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
+trait Loggable {
+    fn log_error(&self, msg: &str);
 
-    let living_world: LivingWorld = serde_json::from_reader(reader)?;
-    // TODO: implement full worlds demo support
-    let cycle_image: &CycleImage = living_world.base();
-    let mut blended_palette = cycle_image.palette().clone();
-    let mut cycled_palette1 = blended_palette.clone();
-    let mut cycled_palette2 = blended_palette.clone();
+    #[allow(unused)]
+    fn log_warning(&self, msg: &str);
 
-    let mut frame_duration = Duration::from_secs_f64(1.0 / (args.fps as f64));
-    let mut linebuf = String::new();
+    #[allow(unused)]
+    fn log_info(&self, msg: &str);
+}
 
-    let img_width = cycle_image.width();
-    let img_height = cycle_image.height();
-    let (term_width, term_height) = {
-        let term_size = term_size::dimensions();
-        if let Some((columns, rows)) = term_size {
-            (columns as u32, rows as u32 * 2)
-        } else {
-            (img_width, img_height)
-        }
-    };
-
-    // initial blank screen
-    let _ = write!(state.stdout, "\x1B[1;1H\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m\x1B[2J");
-    let _ = state.stdout.flush();
-
-    let mut x = 0;
-    let mut y = 0;
-
-    if img_width > term_width {
-        x = (img_width - term_width) / 2;
-    }
-
-    if img_height > term_height {
-        y = (img_height - term_height) / 2;
-    }
-
-    let mut viewport = cycle_image.get_rect(
-        x, y,
-        img_width.min(term_width),
-        img_height.min(term_height));
-
-    let mut frame = RgbImage::new(viewport.width(), viewport.height());
-    let mut prev_frame = RgbImage::new(viewport.width(), viewport.height());
-
-    let mut old_term_width = term_width;
-    let mut old_term_height = term_height;
-
-    let filename = path.file_name().map(|f| f.to_string_lossy()).unwrap_or_else(|| path.to_string_lossy());
-    let mut message: String = format!(" {filename} ");
-    let mut message_shown = args.osd;
-    let message_display_duration = Duration::from_secs(3);
-
-    let loop_start_ts = Instant::now();
-    let mut message_end_ts = if args.osd {
-        loop_start_ts + message_display_duration
-    } else {
-        loop_start_ts
-    };
-
-    while state.running.load(Ordering::Relaxed) {
-        let frame_start_ts = Instant::now();
-        let mut time_of_day = if let Some(current_time) = state.current_time {
-            current_time
-        } else {
-            get_time_of_day_msec(state.time_speed)
-        };
-
-        // process input
-        let term_size = term_size::dimensions();
-        let (term_width, term_height) = if let Some((columns, rows)) = term_size {
-            (columns as u32, rows as u32 * 2)
-        } else {
-            (img_width, img_height)
-        };
-
-        let old_message_len = message.len();
-        let old_x = x;
-        let old_y = y;
-
-        let mut viewport_x = 0;
-        let mut viewport_y = 0;
-
-        if img_width <= term_width {
-            x = 0;
-            viewport_x = (term_width - img_width) / 2;
-        } else if x > img_width - term_width {
-            x = img_width - term_width;
-        }
-
-        if img_height <= term_height {
-            y = 0;
-            viewport_y = (term_height - img_height) / 2;
-        } else if y > img_height - term_height {
-            y = img_height - term_height;
-        }
-
-        let mut updated_message = false;
-        macro_rules! show_message {
-            ($($args:expr),+) => {
-                if args.osd {
-                    message_end_ts = frame_start_ts + message_display_duration;
-                    message.clear();
-                    use std::fmt::Write;
-                    message.push_str(" ");
-                    let _ = write!(&mut message, $($args),+);
-                    message.push_str(" ");
-                    updated_message = true;
-                }
-            };
-        }
-
-        loop {
-            // TODO: Windows support, maybe with ReadConsoleInput()?
-            match nb_read_byte(&mut state.stdin)? {
-                None => break,
-                Some(b'q') => return Ok(Action::Quit),
-                Some(b'b') => {
-                    args.blend = !args.blend;
-
-                    show_message!("Blend Mode: {}", if args.blend { "Enabled" } else { "Disabled" });
-                }
-                Some(b'o') => {
-                    if args.osd {
-                        show_message!("OSD: Disabled");
-                        args.osd = false;
-                    } else {
-                        args.osd = true;
-                        show_message!("OSD: Enabled");
-                    }
-                }
-                Some(b'+') => {
-                    if args.fps < MAX_FPS {
-                        args.fps += 1;
-                        frame_duration = Duration::from_secs_f64(1.0 / args.fps as f64);
-
-                        show_message!("FPS: {}", args.fps);
-                    }
-                }
-                Some(b'-') => {
-                    if args.fps > 1 {
-                        args.fps -= 1;
-                        frame_duration = Duration::from_secs_f64(1.0 / args.fps as f64);
-
-                        show_message!("FPS: {}", args.fps);
-                    }
-                }
-                Some(b'n') => {
-                    let new_index = file_index + 1;
-                    if new_index >= args.paths.len() {
-                        show_message!("Already at last file.");
-                    } else {
-                        return Ok(Action::Goto(new_index));
-                    }
-                }
-                Some(b'p') => {
-                    if file_index == 0 {
-                        show_message!("Already at first file.");
-                    } else {
-                        return Ok(Action::Goto(file_index - 1));
-                    }
-                }
-                Some(b'a') => {
-                    let rem = time_of_day % TIME_STEP;
-                    let new_time = time_of_day - rem;
-                    if new_time == time_of_day {
-                        if new_time < TIME_STEP {
-                            time_of_day = DAY_DURATION - TIME_STEP;
-                        } else {
-                            time_of_day = new_time - TIME_STEP;
-                        }
-                    } else {
-                        time_of_day = new_time;
-                    }
-                    state.time_speed = 1;
-                    state.current_time = Some(time_of_day);
-                    let (hours, mins) = get_hours_mins(time_of_day);
-                    show_message!("{hours}:{mins:02}");
-                }
-                Some(b'd') => {
-                    let rem = time_of_day % TIME_STEP;
-                    let new_time = time_of_day - rem + TIME_STEP;
-                    if new_time >= DAY_DURATION {
-                        time_of_day = 0;
-                    } else {
-                        time_of_day = new_time;
-                    }
-                    state.time_speed = 1;
-                    state.current_time = Some(time_of_day);
-                    let (hours, mins) = get_hours_mins(time_of_day);
-                    show_message!("{hours}:{mins:02}");
-                }
-                Some(b's') => {
-                    if state.current_time.is_some() {
-                        state.time_speed = 1;
-                        state.current_time = None;
-                        time_of_day = get_time_of_day_msec(state.time_speed);
-                    }
-                    let (hours, mins) = get_hours_mins(time_of_day);
-                    show_message!("{hours}:{mins:02}");
-                }
-                Some(b'f') => {
-                    if state.time_speed == 1 {
-                        state.time_speed = FAST_FORWARD_SPEED;
-                        state.current_time = None;
-                        time_of_day = get_time_of_day_msec(state.time_speed);
-                        show_message!("Fast Forward: ON");
-                    } else {
-                        state.time_speed = 1;
-                        show_message!("Fast Forward: OFF");
-                    }
-                }
-                Some(0x1b) => {
-                    match nb_read_byte(&mut state.stdin)? {
-                        None => return Ok(Action::Quit),
-                        Some(0x1b) => return Ok(Action::Quit),
-                        Some(b'[') => {
-                            match nb_read_byte(&mut state.stdin)? {
-                                None => break,
-                                Some(b'A') => {
-                                    // Up
-                                    if img_height > term_height && y > 0 {
-                                        y -= 1;
-                                    }
-                                }
-                                Some(b'B') => {
-                                    // Down
-                                    if img_height > term_height && y < (img_height - term_height) {
-                                        y += 1;
-                                    }
-                                }
-                                Some(b'C') => {
-                                    // Right
-                                    if img_width > term_width && x < (img_width - term_width) {
-                                        x += 1;
-                                    }
-                                }
-                                Some(b'D') => {
-                                    // Left
-                                    if img_width > term_width && x > 0 {
-                                        x -= 1;
-                                    }
-                                }
-                                Some(b'H') => {
-                                    // Home
-                                    if img_width > term_width {
-                                        x = 0;
-                                    }
-                                }
-                                Some(b'F') => {
-                                    // End
-                                    if img_width > term_width {
-                                        x = img_width - term_width;
-                                    }
-                                }
-                                Some(b'1') => {
-                                    match nb_read_byte(&mut state.stdin)? {
-                                        None => break,
-                                        Some(b';') => {
-                                            match nb_read_byte(&mut state.stdin)? {
-                                                None => break,
-                                                Some(b'5') => {
-                                                    match nb_read_byte(&mut state.stdin)? {
-                                                        None => break,
-                                                        Some(b'H') => {
-                                                            // Ctrl+Home
-                                                            if img_height > term_height {
-                                                                y = 0;
-                                                            }
-                                                        }
-                                                        Some(b'F') => {
-                                                            // Ctrl+End
-                                                            if img_height > term_height {
-                                                                y = img_height - term_height;
-                                                            }
-                                                        }
-                                                        _ => break,
-                                                    }
-                                                }
-                                                _ => break,
-                                            }
-                                        }
-                                        _ => break,
-                                    }
-                                }
-                                Some(b'5') => {
-                                    match nb_read_byte(&mut state.stdin)? {
-                                        None => break,
-                                        Some(b'~') => {
-                                            // Page Up
-                                            if img_height > term_height {
-                                                let half = term_height / 2;
-                                                if y > half {
-                                                    y -= half;
-                                                } else {
-                                                    y = 0;
-                                                }
-                                            }
-                                        }
-                                        Some(b';') => {
-                                            match nb_read_byte(&mut state.stdin)? {
-                                                None => break,
-                                                Some(b'3') => {
-                                                    match nb_read_byte(&mut state.stdin)? {
-                                                        None => break,
-                                                        Some(b'~') => {
-                                                            // Alt+Page Up
-                                                            if img_width > term_width {
-                                                                let half = term_width / 2;
-                                                                if x > half {
-                                                                    x -= half;
-                                                                } else {
-                                                                    x = 0;
-                                                                }
-                                                            }
-                                                        }
-                                                        _ => {}
-                                                    }
-                                                }
-                                                _ => {}
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                Some(b'6') => {
-                                    match nb_read_byte(&mut state.stdin)? {
-                                        None => break,
-                                        Some(b'~') => {
-                                            // Page Down
-                                            if img_height > term_height {
-                                                let half = term_height / 2;
-                                                let max_y = img_height - term_height;
-                                                y += half;
-                                                if y > max_y {
-                                                    y = max_y;
-                                                }
-                                            }
-                                        }
-                                        Some(b';') => {
-                                            match nb_read_byte(&mut state.stdin)? {
-                                                None => break,
-                                                Some(b'3') => {
-                                                    match nb_read_byte(&mut state.stdin)? {
-                                                        None => break,
-                                                        Some(b'~') => {
-                                                            // Alt+Page Down
-                                                            if img_width > term_width {
-                                                                let half = term_width / 2;
-                                                                let max_x = img_width - term_width;
-                                                                x += half;
-                                                                if x > max_x {
-                                                                    x = max_x;
-                                                                }
-                                                            }
-                                                        }
-                                                        _ => {}
-                                                    }
-                                                }
-                                                _ => {}
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                Some(byte) => {
-                                    if byte.is_ascii_digit() || byte == b';' {
-                                        // eat whole unsupported escape input sequence
-                                        loop {
-                                            let Some(byte) = nb_read_byte(&mut state.stdin)? else {
-                                                break;
-                                            };
-
-                                            if !byte.is_ascii_digit() && byte != b';' {
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                Some(b'0') => {
-                    return Ok(Action::Goto(args.paths.len() - 1));
-                }
-                Some(b'1') => {
-                    return Ok(Action::Goto(0));
-                }
-                Some(b) if b >= b'2' && b <= b'9' => {
-                    let index = (b - b'1') as usize;
-                    if index >= args.paths.len() {
-                        show_message!("Only {} files opened!", args.paths.len());
-                    } else {
-                        return Ok(Action::Goto(index));
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // render frame
-        let mut full_redraw = false;
-        let viewport_row = viewport_y / 2 + 1;
-        let viewport_column = viewport_x + 1;
-        if old_x != x || old_y != y || old_term_width != term_width || old_term_height != term_height {
-            viewport.get_rect_from(x, y, term_width, term_height, &cycle_image);
-            frame = RgbImage::new(viewport.width(), viewport.height());
-
-            if old_term_width != term_width || old_term_height != term_height {
-                prev_frame = RgbImage::new(viewport.width(), viewport.height());
-                full_redraw = true;
-
-                //let _ = write!(state.stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m\x1B[2J");
-                if viewport.width() < term_width || viewport.height() < term_height {
-                    let _ = write!(state.stdout, "\x1B[38;2;0;0;0m\x1B[48;2;0;0;0m");
-
-                    if viewport_y > 0 {
-                        let _ = write!(state.stdout, "\x1B[{};1H\x1B[1J", viewport_row);
-                    }
-
-                    let viewport_rows = (viewport.height() + 1) / 2;
-                    let viewport_end_row = viewport_row + viewport_rows;
-                    if viewport_x > 0 {
-                        let column = viewport_column - 1;
-                        for row in viewport_row..viewport_end_row {
-                            let _ = write!(state.stdout, "\x1B[{};{}H\x1B[1K", row, column);
-                        }
-                    }
-
-                    if viewport_x + viewport.width() < term_width {
-                        let viewport_end_column = viewport_column + viewport.width();
-                        for row in viewport_row..viewport_end_row {
-                            let _ = write!(state.stdout, "\x1B[{};{}H\x1B[0K", row, viewport_end_column);
-                        }
-                    }
-
-                    if (viewport_y + viewport.height() + 1) / 2 < term_height / 2 {
-                        let _ = write!(state.stdout, "\x1B[{};1H\x1B[0J", viewport_end_row);
-                    }
-                }
-            }
-        }
-
-        let blend_cycle = (frame_start_ts - loop_start_ts).as_secs_f64();
-        if !living_world.timeline().is_empty() {
-            let mut palette1 = &living_world.palettes()[living_world.timeline().last().unwrap().palette_index()];
-            let mut palette2 = palette1;
-            let mut prev_time_of_day = 0;
-            let mut next_time_of_day = 0;
-
-            // TODO: binary search?
-            // XXX: what's with the white pixels?
-            let mut found = false;
-            for event in living_world.timeline() {
-                prev_time_of_day = next_time_of_day;
-                next_time_of_day = event.time_of_day() as u64 * 1000;
-                palette1 = palette2;
-                palette2 = &living_world.palettes()[event.palette_index()];
-                if next_time_of_day > time_of_day {
-                    found = true;
-                    break;
-                }
-            }
-
-            if !found {
-                prev_time_of_day = next_time_of_day;
-                next_time_of_day = DAY_DURATION;
-                palette1 = palette2;
-                palette2 = &living_world.palettes()[living_world.timeline().first().unwrap().palette_index()];
-            }
-
-            let current_span = next_time_of_day - prev_time_of_day;
-            let time_in_span = time_of_day - prev_time_of_day;
-            let blend_palettes = time_in_span as f64 / current_span as f64;
-
-            cycled_palette1.apply_cycles_from(palette1.palette(), palette1.cycles(), blend_cycle, args.blend);
-            cycled_palette2.apply_cycles_from(palette2.palette(), palette2.cycles(), blend_cycle, args.blend);
-
-            crate::palette::blend(&cycled_palette1, &cycled_palette2, blend_palettes, &mut blended_palette);
-
-            viewport.indexed_image().apply_with_palette(&mut frame, &blended_palette);
-        } else {
-            cycled_palette1.apply_cycles_from(&blended_palette, cycle_image.cycles(), blend_cycle, args.blend);
-            viewport.indexed_image().apply_with_palette(&mut frame, &cycled_palette1);
-        }
-
-        let full_width = viewport.width() >= term_width;
-        if full_redraw {
-            simple_image_to_ansi_into(&frame, &mut linebuf);
-        } else {
-            image_to_ansi_into(&prev_frame, &frame, full_width, &mut linebuf);
-        }
-
-        std::mem::swap(&mut frame, &mut prev_frame);
-
-        let _ = write!(state.stdout, "\x1B[{};{}H{linebuf}", viewport_row, viewport_column);
-
-        old_term_width  = term_width;
-        old_term_height = term_height;
-
-        if state.time_speed != 1 && message.is_empty() {
-            let (hours, mins) = get_hours_mins(time_of_day);
-            show_message!("{hours}:{mins:02}");
-        }
-
-        if message_end_ts >= frame_start_ts {
-            if updated_message && old_message_len > message.len() {
-                // full redraw next frame by faking old term size of 0x0
-                old_term_width  = 0;
-                old_term_height = 0;
-            } else {
-                let msg_len = message.len();
-
-                let column = if msg_len < term_width as usize {
-                    (term_width as usize - msg_len) / 2 + 1
-                } else { 1 };
-
-                let message = if msg_len > term_width as usize {
-                    &message[..term_width as usize]
-                } else {
-                    &message
-                };
-
-                let _ = write!(state.stdout,
-                    "\x1B[{};{}H\x1B[38;2;255;255;255m\x1B[48;2;0;0;0m{}",
-                    term_height, column, message);
-                message_shown = true;
-            }
-        } else if message_shown {
-            // full redraw next frame by faking old term size of 0x0
-            old_term_width  = 0;
-            old_term_height = 0;
-            message_shown = false;
-        }
-
-        let _ = state.stdout.flush();
-
-        // sleep for rest of frame
-        let elapsed = frame_start_ts.elapsed();
-        if frame_duration > elapsed && !interruptable_sleep(frame_duration - elapsed) {
-            return Ok(Action::Quit);
+impl<T, E> Loggable for std::result::Result<T, E>
+where E: std::fmt::Display {
+    #[inline]
+    fn log_error(&self, msg: &str) {
+        if let Err(err) = self {
+            eprint!("ERROR: {msg}: {}", err);
         }
     }
 
-    Ok(Action::Quit)
+    #[inline]
+    fn log_info(&self, msg: &str) {
+        if let Err(err) = self {
+            print!("INFO: {msg}: {}", err);
+        }
+    }
+
+    #[inline]
+    fn log_warning(&self, msg: &str) {
+        if let Err(err) = self {
+            print!("WARNING: {msg}: {}", err);
+        }
+    }
 }

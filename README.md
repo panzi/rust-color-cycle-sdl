@@ -1,19 +1,16 @@
-# A Color Cycle Viewer for the terminal
+# A Color Cycle Viewer
 
 Color Cycling is a technique to render images with color palette based
-animations. It was used in 90ies video games. This program renders such
-images to Unicode capable ANSI terminals. Windows is not supported, but
-I'd accept a pull request for that.
+animations. It was used in 90ies video games.
 
 This implementation only supports a the background layer (no overlays)
-and no time based events (for now, maybe I'll add that at some later time).
+including time of day shifts, but no time based events (for now, maybe
+I'll add that at some later time).
 
 This viewer reads [Living Worlds Maker](https://magrathea.onrender.com/)
 files (only the background layer) or JSON files similar to what the
 [Canvas Cycle](https://experiments.withgoogle.com/canvas-cycle) demo
 by Joseph Huckaby uses.
-
-[Short Demo Video](https://www.youtube.com/watch?v=QMQ93uL1Fhk)
 
 ## Usage
 
@@ -66,7 +63,8 @@ Options:
 | `0` | Open last file |
 | `+` | Increase frames per second by 1 |
 | `-` | Decrease frames per second by 1 |
-| `F` | Toogle fast forward (10000x speed). |
+| `F` | Toggle full-screen |
+| `W` | Toogle fast forward (10000x speed). |
 | `A` | Go back in time by 5 minutes. |
 | `D` | Go forward in time by 5 minutes. |
 | `S` | Go to current time and continue normal progression. |
