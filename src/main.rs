@@ -31,6 +31,9 @@ use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::Rect;
+use sdl2::render::TextureQuery;
+use sdl2::rwops::RWops;
+use sdl2::ttf::Font;
 use sdl2::video::{FullscreenType, WindowPos};
 
 #[cfg(not(windows))]
@@ -46,6 +49,8 @@ const MAX_FPS: u32 = 10_000;
 const TIME_STEP: u64 = 60 * 5 * 1000;
 const DAY_DURATION: u64 = 24 * 60 * 60 * 1000;
 const FAST_FORWARD_SPEED: u64 = 10_000;
+
+const HACK_FONT: &[u8] = include_bytes!("../assets/Hack-Regular.ttf");
 
 fn interruptable_sleep(duration: Duration) -> bool {
     #[cfg(unix)]
@@ -226,9 +231,12 @@ impl ColorCycleViewer {
             });
         }
 
+        let ttf = sdl2::ttf::init().map_err(|err| err.to_string())?;
+        let font = ttf.load_font_from_rwops(RWops::from_bytes(HACK_FONT)?, 16)?;
+
         let mut init = true;
         loop {
-            match self.show_image(init) {
+            match self.show_image(init, &font) {
                 Ok(Action::Goto(index)) => {
                     self.file_index = index;
                 }
@@ -243,7 +251,7 @@ impl ColorCycleViewer {
         }
     }
 
-    fn show_image(&mut self, init: bool) -> Result<Action, String> {
+    fn show_image(&mut self, init: bool, font: &Font) -> Result<Action, String> {
         let path = &self.paths[self.file_index];
         let file = File::open(path).map_err(|err| err.to_string())?;
         let reader = BufReader::new(file);
@@ -279,6 +287,7 @@ impl ColorCycleViewer {
         }
 
         let mut message = String::new();
+        let mut message_texture = None;
         let message_display_duration = Duration::from_secs(3);
 
         self.canvas.set_draw_color(Color::RGBA(0, 0, 0, 255));
@@ -286,7 +295,9 @@ impl ColorCycleViewer {
 
         let loop_start_ts = Instant::now();
         let mut message_end_ts = if self.osd {
+            message.push_str(" ");
             message.push_str(&filename);
+            message.push_str(" ");
             println!("{message}");
             loop_start_ts + message_display_duration
         } else {
@@ -307,8 +318,11 @@ impl ColorCycleViewer {
                         message_end_ts = frame_start_ts + message_display_duration;
                         message.clear();
                         use std::fmt::Write;
+                        message.push_str(" ");
                         let _ = write!(&mut message, $($args),+);
-                        println!("{message}");
+                        message.push_str(" ");
+                        // println!("{message}");
+                        message_texture = None;
                     }
                 };
             }
@@ -317,7 +331,7 @@ impl ColorCycleViewer {
             for event in self.event_pump.poll_iter() {
                 match event {
                     Event::Quit { .. } => return Ok(Action::Quit),
-                    Event::KeyDown { timestamp: _, window_id: _, keycode, scancode: _, keymod: _, repeat: _ } => {
+                    Event::KeyDown { keycode, .. } => {
                         if let Some(keycode) = keycode {
                             match keycode {
                                 Keycode::Q | Keycode::ESCAPE => {
@@ -488,23 +502,23 @@ impl ColorCycleViewer {
                         break;
                     }
                 }
-    
+
                 if !found {
                     prev_time_of_day = next_time_of_day;
                     next_time_of_day = DAY_DURATION;
                     palette1 = palette2;
                     palette2 = &living_world.palettes()[living_world.timeline().first().unwrap().palette_index()];
                 }
-    
+
                 let current_span = next_time_of_day - prev_time_of_day;
                 let time_in_span = time_of_day - prev_time_of_day;
                 let blend_palettes = time_in_span as f64 / current_span as f64;
-    
+
                 cycled_palette1.apply_cycles_from(palette1.palette(), palette1.cycles(), blend_cycle, self.blend);
                 cycled_palette2.apply_cycles_from(palette2.palette(), palette2.cycles(), blend_cycle, self.blend);
-    
+
                 crate::palette::blend(&cycled_palette1, &cycled_palette2, blend_palettes, &mut blended_palette);
-    
+
                 cycle_image.indexed_image().apply_with_palette(&mut frame, &blended_palette);
             } else {
                 cycled_palette1.apply_cycles_from(&blended_palette, cycle_image.cycles(), blend_cycle, self.blend);
@@ -542,8 +556,27 @@ impl ColorCycleViewer {
             }
 
             if message_end_ts >= frame_start_ts {
-                // TODO: draw OSD
-                
+                // draw OSD message
+                let texture = if let Some(texture) = &message_texture {
+                    texture
+                } else {
+                    let surface = font.render(&message)
+                        .shaded(Color::RGB(255, 255, 255), Color::RGB(0, 0, 0))
+                        .map_err(|err| err.to_string())?;
+
+                    message_texture = Some(texture_creator
+                        .create_texture_from_surface(surface)
+                        .map_err(|err| err.to_string())?);
+
+                    message_texture.as_ref().unwrap()
+                };
+
+                let TextureQuery { width, height, .. } = texture.query();
+
+                self.canvas.copy(&texture, None, Rect::new(
+                    ((canvas_width - width) / 2) as i32,
+                    (canvas_height - 2 * height) as i32,
+                    width, height))?;
             }
 
             self.canvas.present();
@@ -554,7 +587,7 @@ impl ColorCycleViewer {
                 return Ok(Action::Quit);
             }
         }
-    
+
         Ok(Action::Quit)
     }
 }
