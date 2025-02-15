@@ -125,19 +125,7 @@ F              Toggle full-screen
 W              Toogle fast forward ({FAST_FORWARD_SPEED}x speed).
 A              Go back in time by 5 minutes.
 D              Go forward in time by 5 minutes.
-S              Go to current time and continue normal progression.
-Cursor Up      Move view-port up by 1 pixel
-Cursor Down    Move view-port down by 1 pixel
-Cursor Left    Move view-port left by 1 pixel
-Cursor Right   Move view-port right by 1 pixel
-Home           Move view-port to left edge
-End            Move view-port to right edge
-Ctrl+Home      Move view-port to top
-Ctrl+End       Move view-port to bottom
-Page Up        Move view-port up by half a screen
-Page Down      Move view-port down by half a screen
-Alt+Page Up    Move view-port left by half a screen
-Alt+Page Down  Move view-port right by half a screen");
+S              Go to current time and continue normal progression.");
         return;
     }
 
