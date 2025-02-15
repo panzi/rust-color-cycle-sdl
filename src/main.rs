@@ -118,8 +118,9 @@ fn main() {
 Hotkeys
 =======
 B              Toggle blend mode
-Q or Esccape   Quit program
-O              Toggle On Screen Display of message
+Q              Quit program
+Escape         Close full-screen or quit program
+O              Toggle On Screen Display
 N              Open next file
 P              Open previous file
 1 to 9         Open file by index
@@ -363,9 +364,16 @@ impl<'font> ColorCycleViewer<'font> {
                     Event::KeyDown { keycode, .. } => {
                         if let Some(keycode) = keycode {
                             match keycode {
-                                Keycode::Q | Keycode::ESCAPE => {
+                                Keycode::Q => {
                                     // quit
                                     return Ok(Action::Quit);
+                                }
+                                Keycode::ESCAPE => {
+                                    let window = self.canvas.window_mut();
+                                    if window.fullscreen_state() == FullscreenType::Off {
+                                        return Ok(Action::Quit);
+                                    }
+                                    window.set_fullscreen(FullscreenType::Off)?;
                                 }
                                 Keycode::B => {
                                     // toggle blend mode
