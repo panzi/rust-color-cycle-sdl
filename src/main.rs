@@ -220,11 +220,12 @@ impl ColorCycleViewer {
         }
 
         let ttf = sdl2::ttf::init().map_err(|err| err.to_string())?;
-        let font = ttf.load_font_from_rwops(RWops::from_bytes(HACK_FONT)?, 16)?;
+        let mut font = None;
+        let mut font_size = 0u16;
 
         let mut init = true;
         loop {
-            match self.show_image(init, &font) {
+            match self.show_image(init, &ttf, &mut font, &mut font_size) {
                 Ok(Action::Goto(index)) => {
                     self.file_index = index;
                 }
@@ -239,7 +240,7 @@ impl ColorCycleViewer {
         }
     }
 
-    fn show_image(&mut self, init: bool, font: &Font) -> Result<Action, String> {
+    fn show_image<'font>(&mut self, init: bool, ttf: &'font sdl2::ttf::Sdl2TtfContext, font: &mut Option<Font<'font, 'static>>, font_size: &mut u16) -> Result<Action, String> {
         let path = &self.paths[self.file_index];
         let file = File::open(path).map_err(|err| err.to_string())?;
         let reader = BufReader::new(file);
@@ -286,7 +287,7 @@ impl ColorCycleViewer {
             message.push_str(" ");
             message.push_str(&filename);
             message.push_str(" ");
-            println!("{message}");
+            // println!("{message}");
             loop_start_ts + message_display_duration
         } else {
             loop_start_ts
@@ -545,9 +546,23 @@ impl ColorCycleViewer {
 
             if message_end_ts >= frame_start_ts {
                 // draw OSD message
+                let new_font_size = (canvas_height / 30) as u16;
+                if new_font_size != *font_size {
+                    *font = None;
+                    message_texture = None;
+                }
+
                 let texture = if let Some(texture) = &message_texture {
                     texture
                 } else {
+                    let font = if let Some(font) = font {
+                        font
+                    } else {
+                        *font = Some(ttf.load_font_from_rwops(RWops::from_bytes(HACK_FONT)?, new_font_size)?);
+                        *font_size = new_font_size;
+                        font.as_ref().unwrap()
+                    };
+
                     let surface = font.render(&message)
                         .shaded(Color::RGB(255, 255, 255), Color::RGB(0, 0, 0))
                         .map_err(|err| err.to_string())?;
