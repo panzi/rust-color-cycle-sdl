@@ -27,13 +27,12 @@ use std::time::{Duration, Instant};
 use std::fs::File;
 use std::io::BufReader;
 
-use sdl2::event::Event;
+use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::Rect;
 use sdl2::render::TextureQuery;
 use sdl2::rwops::RWops;
-use sdl2::ttf::Font;
 use sdl2::video::{FullscreenType, WindowPos};
 
 #[cfg(not(windows))]
@@ -134,6 +133,13 @@ S              Go to current time and continue normal progression.");
         blend: args.blend,
         osd: args.osd,
         paths: args.paths,
+        ttf: &match sdl2::ttf::init() {
+            Ok(ttf) => ttf,
+            Err(err) => {
+                eprintln!("{}", err);
+                std::process::exit(1);
+            }
+        },
     }) {
         Ok(mut viewer) => {
             if let Err(err) = viewer.run() {
@@ -144,20 +150,19 @@ S              Go to current time and continue normal progression.");
         Err(err) => {
             eprintln!("{}", err);
             std::process::exit(1);
-
         }
     }
 }
 
-#[derive(Debug, Clone, Default)]
-struct ColorCycleViewerOptions {
+struct ColorCycleViewerOptions<'font> {
     fps: u32,
     blend: bool,
     osd: bool,
     paths: Vec<PathBuf>,
+    ttf: &'font sdl2::ttf::Sdl2TtfContext,
 }
 
-struct ColorCycleViewer {
+struct ColorCycleViewer<'font> {
     fps: u32,
     blend: bool,
     osd: bool,
@@ -166,17 +171,21 @@ struct ColorCycleViewer {
     running: Arc<AtomicBool>,
     current_time: Option<u64>,
     time_speed: u64,
+    was_resized: bool,
 
     #[allow(unused)]
     sdl: sdl2::Sdl,
+    ttf: &'font sdl2::ttf::Sdl2TtfContext,
+    font: Option<sdl2::ttf::Font<'font, 'static>>,
+    font_size: u16,
     #[allow(unused)]
     video: sdl2::VideoSubsystem,
     canvas: sdl2::render::WindowCanvas,
     event_pump: sdl2::EventPump,
 }
 
-impl ColorCycleViewer {
-    pub fn new(options: ColorCycleViewerOptions) -> Result<ColorCycleViewer, String> {
+impl<'font> ColorCycleViewer<'font> {
+    pub fn new(options: ColorCycleViewerOptions<'font>) -> Result<ColorCycleViewer, String> {
         let sdl = sdl2::init()?;
         let video = sdl.video()?;
         let window = video
@@ -204,7 +213,11 @@ impl ColorCycleViewer {
             time_speed: 1,
             file_index: 0,
 
+            was_resized: false,
             sdl,
+            ttf: options.ttf,
+            font: None,
+            font_size: 0,
             video,
             canvas,
             event_pump,
@@ -219,13 +232,8 @@ impl ColorCycleViewer {
             });
         }
 
-        let ttf = sdl2::ttf::init().map_err(|err| err.to_string())?;
-        let mut font = None;
-        let mut font_size = 0u16;
-
-        let mut init = true;
         loop {
-            match self.show_image(init, &ttf, &mut font, &mut font_size) {
+            match self.show_image() {
                 Ok(Action::Goto(index)) => {
                     self.file_index = index;
                 }
@@ -236,11 +244,10 @@ impl ColorCycleViewer {
                     return Err(err);
                 }
             }
-            init = false;
         }
     }
 
-    fn show_image<'font>(&mut self, init: bool, ttf: &'font sdl2::ttf::Sdl2TtfContext, font: &mut Option<Font<'font, 'static>>, font_size: &mut u16) -> Result<Action, String> {
+    fn show_image(&mut self) -> Result<Action, String> {
         let path = &self.paths[self.file_index];
         let file = File::open(path).map_err(|err| err.to_string())?;
         let reader = BufReader::new(file);
@@ -268,11 +275,28 @@ impl ColorCycleViewer {
         ).map_err(|err| err.to_string())?;
 
         let filename = path.file_name().map(|f| f.to_string_lossy()).unwrap_or_else(|| path.to_string_lossy());
-        self.canvas.window_mut().set_title(&format!("{filename} - Canvas Cycle Viewer")).log_error("window.set_title()");
+        self.canvas.window_mut().set_title(&format!("{filename} - Color Cycle Viewer")).log_error("window.set_title()");
 
-        if init && self.canvas.window().fullscreen_state() == FullscreenType::Off {
-            self.canvas.window_mut().set_size(img_width, img_height).log_error("window.set_size()");
-            self.canvas.window_mut().set_position(WindowPos::Centered, WindowPos::Centered);
+        if !self.was_resized {
+            if self.canvas.window().fullscreen_state() == FullscreenType::Off {
+                // Guess if the window is approximately cnetered on the screen and
+                // if yes, then re-center after resizing.
+                let window = self.canvas.window_mut();
+                let display_mode = self.video.current_display_mode(window.display_index()?)?;
+                let (win_width, win_height) = window.size();
+                let (win_x, win_y) = window.position();
+                let expected_x = (display_mode.w - win_width  as i32) / 2;
+                let expected_y = (display_mode.h - win_height as i32) / 2;
+                let is_centered =
+                    (expected_x - win_x).abs() <= display_mode.w / 20 &&
+                    (expected_y - win_y).abs() <= display_mode.h / 20;
+
+                window.set_size(img_width, img_height).log_error("window.set_size()");
+
+                if is_centered {
+                    window.set_position(WindowPos::Centered, WindowPos::Centered);
+                }
+            }
         }
 
         let mut message = String::new();
@@ -319,6 +343,14 @@ impl ColorCycleViewer {
             // process input
             for event in self.event_pump.poll_iter() {
                 match event {
+                    Event::Window { win_event, .. } => {
+                        match win_event {
+                            WindowEvent::Resized(_, _) => {
+                                self.was_resized = true;
+                            }
+                            _ => {}
+                        }
+                    }
                     Event::Quit { .. } => return Ok(Action::Quit),
                     Event::KeyDown { keycode, .. } => {
                         if let Some(keycode) = keycode {
@@ -412,11 +444,9 @@ impl ColorCycleViewer {
                                 }
                                 Keycode::S => {
                                     // to current time
-                                    if self.current_time.is_some() {
-                                        self.time_speed = 1;
-                                        self.current_time = None;
-                                        time_of_day = get_time_of_day_msec(self.time_speed);
-                                    }
+                                    self.time_speed = 1;
+                                    self.current_time = None;
+                                    time_of_day = get_time_of_day_msec(self.time_speed);
                                     let (hours, mins) = get_hours_mins(time_of_day);
                                     show_message!("{hours}:{mins:02}");
                                 }
@@ -547,20 +577,20 @@ impl ColorCycleViewer {
             if message_end_ts >= frame_start_ts {
                 // draw OSD message
                 let new_font_size = (canvas_height / 30) as u16;
-                if new_font_size != *font_size {
-                    *font = None;
+                if new_font_size != self.font_size {
+                    self.font = None;
                     message_texture = None;
                 }
 
                 let texture = if let Some(texture) = &message_texture {
                     texture
                 } else {
-                    let font = if let Some(font) = font {
+                    let font = if let Some(font) = &self.font {
                         font
                     } else {
-                        *font = Some(ttf.load_font_from_rwops(RWops::from_bytes(HACK_FONT)?, new_font_size)?);
-                        *font_size = new_font_size;
-                        font.as_ref().unwrap()
+                        self.font = Some(self.ttf.load_font_from_rwops(RWops::from_bytes(HACK_FONT)?, new_font_size)?);
+                        self.font_size = new_font_size;
+                        self.font.as_ref().unwrap()
                     };
 
                     let surface = font.render(&message)
@@ -603,15 +633,25 @@ enum Action {
 fn get_time_of_day_msec(time_speed: u64) -> u64 {
     #[cfg(not(windows))]
     unsafe {
-        let mut tod = MaybeUninit::<libc::timeval>::zeroed();
-        if libc::gettimeofday(tod.as_mut_ptr(), std::ptr::null_mut()) != 0 {
+        let mut tod = MaybeUninit::<libc::timespec>::zeroed();
+        if libc::clock_gettime(libc::CLOCK_REALTIME, tod.as_mut_ptr()) != 0 {
             return 0;
         }
         let tod = tod.assume_init_ref();
-        (
-            tod.tv_sec as u64 * 1000 * time_speed +
-            tod.tv_usec as u64 * time_speed / 1000
-        ) % DAY_DURATION
+        let mut tm = MaybeUninit::<libc::tm>::zeroed();
+        if libc::localtime_r(&tod.tv_sec, tm.as_mut_ptr()).is_null() {
+            return 0;
+        }
+        let tm = tm.assume_init_ref();
+        let mut now = Duration::new(tod.tv_sec as u64, tod.tv_nsec as u32);
+
+        if tm.tm_gmtoff > 0 {
+            now += Duration::from_secs(tm.tm_gmtoff as u64);
+        } else {
+            now -= Duration::from_secs((-tm.tm_gmtoff) as u64);
+        }
+
+        ((now.as_millis() * time_speed as u128) % DAY_DURATION as u128) as u64
     }
 
     #[cfg(windows)]
