@@ -466,6 +466,7 @@ impl<'font> ColorCycleViewer<'font> {
                                         show_message!("Fast Forward: ON");
                                     } else {
                                         self.time_speed = 1;
+                                        self.current_time = Some(time_of_day);
                                         show_message!("Fast Forward: OFF");
                                     }
                                 }
