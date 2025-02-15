@@ -16,8 +16,6 @@
 
 use crate::palette::Palette;
 
-use super::RgbImage;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexedImage {
     width: u32,
@@ -153,16 +151,6 @@ impl IndexedImage {
         self.data = other.get_rect_data(x, y, width, height);
     }
 
-    #[inline]
-    pub fn apply_with_palette(&self, image: &mut RgbImage, palette: &Palette) {
-        image.draw_indexed_image_with_palette(self, palette);
-    }
-
-    #[inline]
-    pub fn apply(&self, image: &mut RgbImage) {
-        image.draw_indexed_image(self);
-    }
-
     pub fn resize(&mut self, width: u32, height: u32, index: u8) {
         if width == self.width && height == self.height {
             return;
@@ -180,12 +168,5 @@ impl IndexedImage {
         self.width = width;
         self.height = height;
         self.data = data;
-    }
-}
-
-impl From<IndexedImage> for RgbImage {
-    #[inline]
-    fn from(value: IndexedImage) -> Self {
-        RgbImage::from_indexed_image(&value)
     }
 }

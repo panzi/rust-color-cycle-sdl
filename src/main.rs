@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 use std::fs::File;
 use std::io::BufReader;
 
+use color::Rgb;
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::{Color, PixelFormatEnum};
@@ -39,7 +40,7 @@ use sdl2::video::{FullscreenType, WindowPos};
 use std::mem::MaybeUninit;
 
 use clap::Parser;
-use image::{LivingWorld, RgbImage};
+use image::LivingWorld;
 
 #[cfg(not(windows))]
 use libc;
@@ -263,9 +264,6 @@ impl<'font> ColorCycleViewer<'font> {
 
         let img_width = cycle_image.width();
         let img_height = cycle_image.height();
-        let pitch = img_width as usize * 3;
-
-        let mut frame = RgbImage::new(img_width, img_height);
 
         let texture_creator = self.canvas.texture_creator();
         let mut texture = texture_creator.create_texture(
@@ -503,6 +501,7 @@ impl<'font> ColorCycleViewer<'font> {
 
             // render frame
             let blend_cycle = (frame_start_ts - loop_start_ts).as_secs_f64();
+            let palette;
             if !living_world.timeline().is_empty() {
                 let mut palette1 = &living_world.palettes()[living_world.timeline().last().unwrap().palette_index()];
                 let mut palette2 = palette1;
@@ -538,15 +537,26 @@ impl<'font> ColorCycleViewer<'font> {
 
                 crate::palette::blend(&cycled_palette1, &cycled_palette2, blend_palettes, &mut blended_palette);
 
-                cycle_image.indexed_image().apply_with_palette(&mut frame, &blended_palette);
+                palette = &blended_palette;
             } else {
                 cycled_palette1.apply_cycles_from(&blended_palette, cycle_image.cycles(), blend_cycle, self.blend);
-                cycle_image.indexed_image().apply_with_palette(&mut frame, &cycled_palette1);
+                palette = &cycled_palette1;
             }
 
-            if let Err(err) = texture.update(Rect::new(0, 0, img_width, img_height), frame.data(), pitch) {
-                return Err(err.to_string());
-            }
+            texture.with_lock(None, |pixels, pitch| {
+                let indexed_image = cycle_image.indexed_image();
+                for y in 0..img_height {
+                    let y_offset = y as usize * pitch;
+                    for x in 0..img_width {
+                        let index = indexed_image.get_index(x, y);
+                        let pixel_offset = y_offset + 3 * x as usize;
+                        let Rgb([r, g, b]) = palette[index];
+                        pixels[pixel_offset    ] = r;
+                        pixels[pixel_offset + 1] = g;
+                        pixels[pixel_offset + 2] = b;
+                    }
+                }
+            })?;
 
             self.canvas.clear();
             let (canvas_width, canvas_height) = self.canvas.output_size()?;
