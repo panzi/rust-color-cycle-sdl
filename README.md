@@ -15,10 +15,10 @@ by Joseph Huckaby uses.
 ## Usage
 
 ```
-Usage: color-cycle [OPTIONS] <PATH>...
+Usage: color-cycle-sdl [OPTIONS] <PATHS>...
 
 Arguments:
-  <PATH>...
+  <PATHS>...
           Path to a Canvas Cycle JSON file
 
 Options:
@@ -37,8 +37,11 @@ Options:
   -o, --osd
           Enable On Screen Display.
 
-          Displas messages when changing things like blend mode or FPS.
+          Displays messages when changing things like blend mode or FPS.
 
+
+  -f, --full-screen
+          Start in fullscreen
 
       --help-hotkeys
           Show list of hotkeys

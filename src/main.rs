@@ -34,6 +34,7 @@ use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::Rect;
 use sdl2::render::TextureQuery;
 use sdl2::rwops::RWops;
+use sdl2::sys::SDL_WindowFlags;
 use sdl2::video::{FullscreenType, WindowPos};
 
 #[cfg(not(windows))]
@@ -92,9 +93,13 @@ pub struct Args {
 
     /// Enable On Screen Display.
     /// 
-    /// Displas messages when changing things like blend mode or FPS.{n}
+    /// Displays messages when changing things like blend mode or FPS.{n}
     #[arg(short, long, default_value_t = false)]
     pub osd: bool,
+
+    /// Start in fullscreen
+    #[arg(short, long, default_value_t = false)]
+    pub full_screen: bool,
 
     /// Show list of hotkeys.
     #[arg(long, default_value_t = false)]
@@ -133,6 +138,7 @@ S              Go to current time and continue normal progression.");
         fps: args.fps,
         blend: args.blend,
         osd: args.osd,
+        full_screen: args.full_screen,
         paths: args.paths,
         ttf: &match sdl2::ttf::init() {
             Ok(ttf) => ttf,
@@ -160,6 +166,7 @@ struct ColorCycleViewerOptions<'font> {
     blend: bool,
     osd: bool,
     paths: Vec<PathBuf>,
+    full_screen: bool,
     ttf: &'font sdl2::ttf::Sdl2TtfContext,
 }
 
@@ -191,6 +198,9 @@ impl<'font> ColorCycleViewer<'font> {
         let video = sdl.video()?;
         let window = video
             .window("Color Cycle Viewer", 640, 480)
+            .set_window_flags(if options.full_screen {
+                SDL_WindowFlags::SDL_WINDOW_FULLSCREEN_DESKTOP as u32
+            } else { 0 })
             .position_centered()
             .resizable()
             .build()
