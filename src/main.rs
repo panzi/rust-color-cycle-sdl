@@ -27,7 +27,7 @@ use std::io::BufReader;
 
 use color::Rgb;
 use sdl2::event::{Event, WindowEvent};
-use sdl2::keyboard::Keycode;
+use sdl2::keyboard::{Keycode, Mod};
 use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::Rect;
 use sdl2::render::TextureQuery;
@@ -124,22 +124,30 @@ fn main() {
         println!("\
 Hotkeys
 =======
-B              Toggle blend mode
-Q              Quit program
-Escape         Close full-screen or quit program
-O              Toggle On Screen Display
-C              Toggle zoom to cover/contain
-N              Open next file
-P              Open previous file
-1 to 9         Open file by index
-0              Open last file
-+              Increase frames per second by 1
--              Decrease frames per second by 1
-F              Toggle full-screen
-W              Toogle fast forward ({FAST_FORWARD_SPEED}x speed).
-A              Go back in time by 5 minutes.
-D              Go forward in time by 5 minutes.
-S              Go to current time and continue normal progression.");
+B                  Toggle blend mode
+Q                  Quit program
+Escape             Close full-screen or quit program
+O                  Toggle On Screen Display
+C                  Toggle zoom to cover/contain
+N                  Open next file
+P                  Open previous file
+1 to 9             Open file by index
+0                  Open last file
++                  Increase frames per second by 1
+-                  Decrease frames per second by 1
+F or F11           Toggle full-screen
+W                  Toogle fast forward ({FAST_FORWARD_SPEED}x speed)
+A                  Go back in time by 5 minutes
+D                  Go forward in time by 5 minutes
+S                  Go to current time and continue normal progression
+Cursor Up          Move view-port up by 1 pixel
+Cursor Down        Move view-port down by 1 pixel
+Cursor Left        Move view-port left by 1 pixel
+Cursor Right       Move view-port right by 1 pixel
+Ctrl+Cursor Up     Move view-port up by 5 pixel
+Ctrl+Cursor Down   Move view-port down by 5 pixel
+Ctrl+Cursor Left   Move view-port left by 5 pixel
+Ctrl+Cursor Right  Move view-port right by 5 pixel");
         return;
     }
 
@@ -187,6 +195,9 @@ struct ColorCycleViewer<'font> {
     current_time: Option<u64>,
     time_speed: u64,
     was_resized: bool,
+    was_moved: bool,
+    x: i32,
+    y: i32,
 
     #[allow(unused)]
     sdl: sdl2::Sdl,
@@ -225,8 +236,11 @@ impl<'font> ColorCycleViewer<'font> {
             current_time: None,
             time_speed: 1,
             file_index: 0,
+            x: 0,
+            y: 0,
 
             was_resized: false,
+            was_moved: false,
             sdl,
             font: None,
             font_size: 0,
@@ -343,7 +357,7 @@ impl<'font> ColorCycleViewer<'font> {
             }
 
             // process input
-            for event in self.event_pump.poll_iter() {
+            while let Some(event) = self.event_pump.poll_event() {
                 match event {
                     Event::Window { win_event, .. } => {
                         match win_event {
@@ -356,7 +370,7 @@ impl<'font> ColorCycleViewer<'font> {
                     Event::Quit { .. } => {
                         return Ok(Action::Quit);
                     }
-                    Event::KeyDown { keycode, .. } => {
+                    Event::KeyDown { keycode, keymod, repeat, .. } => {
                         if let Some(keycode) = keycode {
                             match keycode {
                                 Keycode::Q => {
@@ -471,14 +485,16 @@ impl<'font> ColorCycleViewer<'font> {
                                     let (hours, mins) = get_hours_mins(time_of_day);
                                     show_message!("{hours}:{mins:02}");
                                 }
-                                Keycode::F => {
+                                Keycode::F | Keycode::F11 => {
                                     // toggle fullscreen
-                                    let window = self.canvas.window_mut();
-                                    let value = match window.fullscreen_state() {
-                                        FullscreenType::Desktop | FullscreenType::True => FullscreenType::Off,
-                                        FullscreenType::Off => FullscreenType::Desktop,
-                                    };
-                                    window.set_fullscreen(value).log_error("window.set_fullscreen()");
+                                    if !repeat {
+                                        let window = self.canvas.window_mut();
+                                        let value = match window.fullscreen_state() {
+                                            FullscreenType::Desktop | FullscreenType::True => FullscreenType::Off,
+                                            FullscreenType::Off => FullscreenType::Desktop,
+                                        };
+                                        window.set_fullscreen(value).log_error("window.set_fullscreen()");
+                                    }
                                 }
                                 Keycode::W => {
                                     // toggle fast forward
@@ -491,6 +507,38 @@ impl<'font> ColorCycleViewer<'font> {
                                         self.time_speed = 1;
                                         self.current_time = Some(time_of_day);
                                         show_message!("Fast Forward: OFF");
+                                    }
+                                }
+                                Keycode::UP => {
+                                    self.move_y(get_move_amount(keymod));
+                                }
+                                Keycode::DOWN => {
+                                    self.move_y(-get_move_amount(keymod));
+                                }
+                                Keycode::LEFT => {
+                                    self.move_x(get_move_amount(keymod));
+                                }
+                                Keycode::RIGHT => {
+                                    self.move_x(-get_move_amount(keymod));
+                                }
+                                Keycode::HOME => {
+                                    if self.options.cover {
+                                        if keymod.bits() & CTRL != 0 {
+                                            self.y = 0;
+                                        } else {
+                                            self.x = 0;
+                                        }
+                                        self.was_moved = true;
+                                    }
+                                }
+                                Keycode::END => {
+                                    if self.options.cover {
+                                        if keymod.bits() & CTRL != 0 {
+                                            self.y = i32::MIN;
+                                        } else {
+                                            self.x = i32::MIN;
+                                        }
+                                        self.was_moved = true;
                                     }
                                 }
                                 Keycode::KP_0 | Keycode::NUM_0 => {
@@ -599,13 +647,30 @@ impl<'font> ColorCycleViewer<'font> {
                     draw_height = canvas_height;
                 }
 
-                draw_x = if draw_width > canvas_width {
-                    -(((draw_width - canvas_width) / 2) as i32)
+                let min_x = if draw_width > canvas_width {
+                    -((draw_width - canvas_width) as i32)
                 } else { 0 };
 
-                draw_y = if draw_height > canvas_height {
-                    -(((draw_height - canvas_height) / 2) as i32)
+                let min_y = if draw_height > canvas_height {
+                    -((draw_height - canvas_height) as i32)
                 } else { 0 };
+
+                if self.was_moved {
+                    let img_min_x = min_x * img_width as i32 / draw_width as i32;
+                    let img_min_y = min_y * img_height as i32 / draw_height as i32;
+
+                    self.x = self.x.clamp(img_min_x, 0);
+                    self.y = self.y.clamp(img_min_y, 0);
+
+                    draw_x = self.x * draw_width as i32 / img_width as i32;
+                    draw_y = self.y * draw_height as i32 / img_height as i32;
+                } else {
+                    draw_x = min_x / 2;
+                    draw_y = min_y / 2;
+
+                    self.x = draw_x * img_width as i32 / draw_width as i32;
+                    self.y = draw_y * img_height as i32 / draw_height as i32;
+                }
             } else {
                 if draw_height > canvas_height {
                     draw_width = img_width * canvas_height / img_height;
@@ -674,6 +739,58 @@ impl<'font> ColorCycleViewer<'font> {
                 return Ok(Action::Quit);
             }
         }
+    }
+
+    fn move_x(&mut self, amount: i32) {
+        if self.options.cover {
+            if amount > 0 {
+                if self.x > i32::MAX - amount {
+                    self.x = i32::MAX;
+                } else {
+                    self.x += amount;
+                }
+            } else {
+                if self.x < i32::MIN - amount {
+                    self.x = i32::MIN;
+                } else {
+                    self.x += amount;
+                }
+            }
+            self.was_moved = true;
+        }
+    }
+
+    fn move_y(&mut self, amount: i32) {
+        if self.options.cover {
+            if amount > 0 {
+                if self.y > i32::MAX - amount {
+                    self.y = i32::MAX;
+                } else {
+                    self.y += amount;
+                }
+            } else {
+                if self.y < i32::MIN - amount {
+                    self.y = i32::MIN;
+                } else {
+                    self.y += amount;
+                }
+            }
+            self.was_moved = true;
+        }
+    }
+}
+
+// const ALT: u16 = Mod::LALTMOD.bits() | Mod::RALTMOD.bits();
+// const SHIFT: u16 = Mod::LSHIFTMOD.bits() | Mod::RSHIFTMOD.bits();
+const CTRL: u16 = Mod::LCTRLMOD.bits() | Mod::RCTRLMOD.bits();
+
+#[inline]
+fn get_move_amount(keymod: Mod) -> i32 {
+    let keymod = keymod.bits();
+    if keymod & CTRL != 0 {
+        10
+    } else {
+        1
     }
 }
 

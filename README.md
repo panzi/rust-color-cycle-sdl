@@ -79,8 +79,16 @@ Options:
 | `0` | Open last file |
 | `+` | Increase frames per second by 1 |
 | `-` | Decrease frames per second by 1 |
-| `F` | Toggle full-screen |
-| `W` | Toogle fast forward (10000x speed). |
-| `A` | Go back in time by 5 minutes. |
-| `D` | Go forward in time by 5 minutes. |
-| `S` | Go to current time and continue normal progression. |
+| `F` or `F11` | Toggle full-screen |
+| `W` | Toogle fast forward (10000x speed) |
+| `A` | Go back in time by 5 minutes |
+| `D` | Go forward in time by 5 minutes |
+| `S` | Go to current time and continue normal progression |
+| `Cursor Up`    | Move view-port up by 1 pixel |
+| `Cursor Down`  | Move view-port down by 1 pixel |
+| `Cursor Left`  | Move view-port left by 1 pixel |
+| `Cursor Right` | Move view-port right by 1 pixel |
+| `Ctrl`+`Cursor Up`    | Move view-port up by 5 pixel |
+| `Ctrl`+`Cursor Down`  | Move view-port down by 5 pixel |
+| `Ctrl`+`Cursor Left`  | Move view-port left by 5 pixel |
+| `Ctrl`+`Cursor Right` | Move view-port right by 5 pixel |
