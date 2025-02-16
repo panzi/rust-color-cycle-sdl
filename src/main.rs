@@ -19,16 +19,19 @@ pub mod image;
 pub mod palette;
 pub mod read;
 pub mod ilbm;
+pub mod bitvec;
 
 use std::fmt::{Debug, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, Seek};
 
 use color::Rgb;
+use palette::{Cycle, Palette};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::{Keycode, Mod};
+use sdl2::messagebox::{MessageBoxButtonFlag, MessageBoxFlag};
 use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::Rect;
 use sdl2::render::TextureQuery;
@@ -40,7 +43,7 @@ use sdl2::video::{FullscreenType, WindowPos};
 use std::mem::MaybeUninit;
 
 use clap::Parser;
-use image::LivingWorld;
+use image::{CycleImage, IndexedImage, LivingWorld};
 
 #[cfg(not(windows))]
 use libc;
@@ -97,7 +100,7 @@ pub struct Args {
     pub osd: bool,
 
     /// Start in fullscreen
-    #[arg(short, long, default_value_t = false)]
+    #[arg(short = 'F', long, default_value_t = false)]
     pub full_screen: bool,
 
     /// Cover the window with the animation.
@@ -162,22 +165,34 @@ Ctrl+Cursor Right  Move view-port right by 5 pixel");
         ttf: &match sdl2::ttf::init() {
             Ok(ttf) => ttf,
             Err(err) => {
-                eprintln!("{}", err);
+                show_error(&err.to_string());
                 std::process::exit(1);
             }
         },
     }) {
         Ok(mut viewer) => {
             if let Err(err) = viewer.run() {
-                eprintln!("{}: {}", viewer.options.paths[viewer.file_index].to_string_lossy(), err);
+                show_error(&format!("{}: {}", viewer.options.paths[viewer.file_index].to_string_lossy(), err));
                 std::process::exit(1);
             }
         }
         Err(err) => {
-            eprintln!("{}", err);
+            show_error(&err.to_string());
             std::process::exit(1);
         }
     }
+}
+
+fn show_error(message: &str) {
+    eprintln!("{}", message);
+    let _ = sdl2::messagebox::show_message_box(
+        MessageBoxFlag::ERROR, &[
+            sdl2::messagebox::ButtonData {
+                button_id: 0,
+                flags: MessageBoxButtonFlag::ESCAPEKEY_DEFAULT | MessageBoxButtonFlag::RETURNKEY_DEFAULT,
+                text: "Ok"
+            }
+        ], "Error - Color Cycle Viewer", message, None, None);
 }
 
 struct ColorCycleViewerOptions<'font> {
@@ -270,9 +285,21 @@ impl<'font> ColorCycleViewer<'font> {
     fn show_image(&mut self) -> Result<Action, String> {
         let path = &self.options.paths[self.file_index];
         let file = File::open(path).map_err(|err| err.to_string())?;
-        let reader = BufReader::new(file);
+        let mut reader = BufReader::new(file);
 
-        let living_world: LivingWorld = serde_json::from_reader(reader).map_err(|err| err.to_string())?;
+        let living_world: LivingWorld = match ilbm::ILBM::read(&mut reader) {
+            Ok(ilbm) => {
+                let image: CycleImage = ilbm.try_into()?;
+                image.into()
+            }
+            Err(err) => {
+                reader.seek(std::io::SeekFrom::Start(0)).map_err(|err| err.to_string())?;
+                if err.kind() != ilbm::ErrorKind::UnsupportedFileFormat {
+                    return Err(err.to_string());
+                }
+                serde_json::from_reader(&mut reader).map_err(|err| err.to_string())?
+            }
+        };
         // TODO: implement full worlds demo support
         let cycle_image = living_world.base();
         let mut blended_palette = cycle_image.palette().clone();
