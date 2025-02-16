@@ -19,7 +19,7 @@ pub mod image;
 pub mod palette;
 pub mod read;
 
-use std::fmt::Debug;
+use std::fmt::{Debug, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::fs::File;
@@ -324,10 +324,11 @@ impl<'font> ColorCycleViewer<'font> {
 
         let loop_start_ts = Instant::now();
         let mut message_end_ts = if self.options.osd {
-            message.push_str(" ");
-            message.push_str(&filename);
-            message.push_str(" ");
-            // println!("{message}");
+            if let Some(name) = living_world.name() {
+                let _ = write!(message, " {name} ({filename}) ");
+            } else {
+                let _ = write!(message, " {filename} ");
+            }
             loop_start_ts + message_display_duration
         } else {
             loop_start_ts
@@ -346,11 +347,9 @@ impl<'font> ColorCycleViewer<'font> {
                     if self.options.osd {
                         message_end_ts = frame_start_ts + message_display_duration;
                         message.clear();
-                        use std::fmt::Write;
                         message.push_str(" ");
                         let _ = write!(&mut message, $($args),+);
                         message.push_str(" ");
-                        // println!("{message}");
                         message_texture = None;
                     }
                 };
