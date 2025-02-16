@@ -1,4 +1,4 @@
-// color-cycle - render color cycle images on the terminal
+// color-cycle - render color cycle images
 // Copyright (C) 2025  Mathias Panzenböck
 // 
 // This program is free software: you can redistribute it and/or modify
