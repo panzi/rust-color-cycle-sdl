@@ -291,7 +291,12 @@ impl<'font> ColorCycleViewer<'font> {
         ).map_err(|err| err.to_string())?;
 
         let filename = path.file_name().map(|f| f.to_string_lossy()).unwrap_or_else(|| path.to_string_lossy());
-        self.canvas.window_mut().set_title(&format!("{filename} - Color Cycle Viewer")).log_error("window.set_title()");
+
+        if let Some(name) = living_world.name() {
+            self.canvas.window_mut().set_title(&format!("{name} ({filename}) - Color Cycle Viewer"))
+        } else {
+            self.canvas.window_mut().set_title(&format!("{filename} - Color Cycle Viewer"))
+        }.log_error("window.set_title()");
 
         if !self.was_resized {
             if self.canvas.window().fullscreen_state() == FullscreenType::Off {
