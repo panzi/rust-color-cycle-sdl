@@ -28,7 +28,6 @@ use std::fs::File;
 use std::io::{BufReader, Seek};
 
 use color::Rgb;
-use palette::{Cycle, Palette};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::{Keycode, Mod};
 use sdl2::messagebox::{MessageBoxButtonFlag, MessageBoxFlag};
@@ -43,7 +42,7 @@ use sdl2::video::{FullscreenType, WindowPos};
 use std::mem::MaybeUninit;
 
 use clap::Parser;
-use image::{CycleImage, IndexedImage, LivingWorld};
+use image::{CycleImage, LivingWorld};
 
 #[cfg(not(windows))]
 use libc;

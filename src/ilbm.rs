@@ -437,7 +437,6 @@ impl BODY {
             1 => {
                 // compressed
                 let mut read_len = 0;
-                eprintln!("mask: {}, width: {}, height: {}, num_planes: {}", header.mask(), header.width(), header.height(), num_planes);
                 for _y in 0..header.height() {
                     let mut pos = 0;
 
@@ -445,9 +444,7 @@ impl BODY {
                         let cmd = read_u8(reader)?;
                         read_len += 1;
                         if cmd < 128 {
-                            let count = read_u8(reader)? as usize + 1;
-                            eprintln!("pos: {pos:3}, cmd: {cmd:3} < 128, count: {count}");
-                            read_len += 1;
+                            let count = cmd as usize + 1;
                             let next_pos = pos + count;
                             if next_pos > line_len {
                                 return Err(Error::new(ErrorKind::BrokenFile,
@@ -458,7 +455,6 @@ impl BODY {
                             pos = next_pos;
                         } else if cmd > 128 {
                             let count = 257 - cmd as usize;
-                            eprintln!("pos: {pos:3}, cmd: {cmd:3} > 128, count: {count}");
                             let value = read_u8(reader)?;
                             read_len += 1;
                             let next_pos = pos + count;
