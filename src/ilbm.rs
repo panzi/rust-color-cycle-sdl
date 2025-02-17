@@ -99,7 +99,7 @@ pub struct BMHD {
     height: u16,
     x_origin: i16,
     y_origin: i16,
-    num_plans: u8,
+    num_planes: u8,
     mask: u8,
     compression: u8,
     trans_color: u16,
@@ -134,8 +134,8 @@ impl BMHD {
     }
 
     #[inline]
-    pub fn num_plans(&self) -> u8 {
-        self.num_plans
+    pub fn num_planes(&self) -> u8 {
+        self.num_planes
     }
 
     #[inline]
@@ -184,7 +184,7 @@ impl BMHD {
         let height = read_u16be(reader)?;
         let x_origin = read_i16be(reader)?;
         let y_origin = read_i16be(reader)?;
-        let num_plans = read_u8(reader)?;
+        let num_planes = read_u8(reader)?;
         let mask = read_u8(reader)?;
         let compression = read_u8(reader)?;
         let _pad1 = read_u8(reader)?;
@@ -195,6 +195,7 @@ impl BMHD {
         let page_heigt = read_i16be(reader)?;
 
         if chunk_len > Self::SIZE {
+            // eprintln!("{} unknown bytes in header", (chunk_len - Self::SIZE));
             reader.seek_relative((chunk_len - Self::SIZE).into())?;
         }
 
@@ -203,7 +204,7 @@ impl BMHD {
             height,
             x_origin,
             y_origin,
-            num_plans,
+            num_planes,
             mask,
             compression,
             trans_color,
@@ -219,6 +220,16 @@ impl BMHD {
 pub enum FileType {
     ILBM,
     PBM,
+}
+
+impl Display for FileType {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FileType::ILBM => "ILBM".fmt(f),
+            FileType::PBM  => "PBM".fmt(f),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -334,6 +345,7 @@ impl ILBM {
         while pos < main_chunk_len {
             reader.read_exact(&mut fourcc)?;
             let chunk_len = read_u32be(reader)?;
+            // eprintln!("chunk: {:?}", String::from_utf8_lossy(&fourcc));
 
             match &fourcc {
                 b"BMHD" => {
@@ -385,6 +397,26 @@ impl ILBM {
             ccrts,
         })
     }
+
+    pub fn column_swap(&mut self) {
+        let width  = self.header().width() as usize;
+        let height = self.header().height() as usize;
+        if let Some(body) = &mut self.body {
+            let columns = width / 8;
+            let rem = width % 8;
+            for y in 0..height {
+                let y_offset = y * width;
+                for col in 0..columns {
+                    let index = y_offset + col * 8;
+                    body.pixels[index..index + 8].reverse();
+                }
+                if rem > 0 {
+                    let index = y_offset + columns * 8;
+                    body.pixels[index..index + rem].reverse();
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -406,15 +438,17 @@ impl BODY {
 
     pub fn read<R>(reader: &mut R, chunk_len: u32, file_type: FileType, header: &BMHD) -> Result<Self>
     where R: Read + Seek {
-        let num_planes = header.num_plans() as usize;
+        let num_planes = header.num_planes() as usize;
         match num_planes {
             1 | 4 | 8 => {}
             _ => {
-                return Err(Error::new(ErrorKind::BrokenFile,
-                    format!("unsupported number of bit planes: {num_planes}")));
+                if file_type != FileType::ILBM || num_planes > 8 {
+                    return Err(Error::new(ErrorKind::BrokenFile,
+                        format!("unsupported number of bit planes: {num_planes}")));
+                }
             }
         }
-        // eprintln!("header: {:?}", header);
+        // eprintln!("file_type: {file_type}, header: {:?}", header);
         let plane_len = (header.width() as usize + 15) / 16 * 2;
         let mut line_len = num_planes * plane_len;
         if header.mask() == 1 {
@@ -523,8 +557,11 @@ impl BODY {
                         read_len += 1;
                         if cmd < 128 {
                             let count = cmd as usize + 1;
+                            // eprintln!("pos: {pos:3}, cmd: {cmd:3} < 128, count: {count}");
                             let next_pos = pos + count;
                             if next_pos > line_len {
+                                // count = line_len - pos;
+                                // next_pos = line_len;
                                 return Err(Error::new(ErrorKind::BrokenFile,
                                     format!("broken BODY compression, more data than fits into row: {} > {}", next_pos, line_len)));
                             }
@@ -533,18 +570,23 @@ impl BODY {
                             pos = next_pos;
                         } else if cmd > 128 {
                             let count = 257 - cmd as usize;
+                            // eprintln!("pos: {pos:3}, cmd: {cmd:3} > 128, count: {count}");
                             let value = read_u8(reader)?;
                             read_len += 1;
                             let next_pos = pos + count;
                             if next_pos > line_len {
+                                // count = line_len - pos;
+                                // next_pos = line_len;
                                 return Err(Error::new(ErrorKind::BrokenFile,
                                     format!("broken BODY compression, more data than fits into row: {} > {}", next_pos, line_len)));
                             }
                             line[pos..next_pos].fill(value);
                             pos = next_pos;
                         } else {
+                            // eprintln!("pos: {pos:3}, cmd: {cmd:3} == 128");
                             break;
                         }
+                        // eprintln!("pos: {pos:3}, read_len: {read_len:3}");
                         assert!(pos <= line_len);
 
                         line[pos..].fill(0);

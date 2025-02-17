@@ -111,6 +111,15 @@ pub struct Args {
     #[arg(short, long, default_value_t = false)]
     pub cover: bool,
 
+    /// Swap direction of 8 pixel columns.
+    /// 
+    /// The current implementation of ILBM files is broken for some files and
+    /// swaps the pixels in columns like that. I haven't figured out how do load
+    /// those files correctly (how to detect its such a file), but this option
+    /// can be used to fix the display of those files.
+    #[arg(long, default_value_t = false)]
+    pub ilbm_column_swap: bool,
+
     /// Show list of hotkeys.
     #[arg(long, default_value_t = false)]
     pub help_hotkeys: bool,
@@ -160,6 +169,7 @@ Ctrl+Cursor Right  Move view-port right by 5 pixel");
         osd: args.osd,
         full_screen: args.full_screen,
         cover: args.cover,
+        ilbm_column_swap: args.ilbm_column_swap,
         paths: args.paths,
         ttf: &match sdl2::ttf::init() {
             Ok(ttf) => ttf,
@@ -201,6 +211,7 @@ struct ColorCycleViewerOptions<'font> {
     paths: Vec<PathBuf>,
     full_screen: bool,
     cover: bool,
+    ilbm_column_swap: bool,
     ttf: &'font sdl2::ttf::Sdl2TtfContext,
 }
 
@@ -285,9 +296,20 @@ impl<'font> ColorCycleViewer<'font> {
         let path = &self.options.paths[self.file_index];
         let file = File::open(path).map_err(|err| err.to_string())?;
         let mut reader = BufReader::new(file);
+        let mut x_aspect = 1;
+        let mut y_aspect = 1;
 
         let living_world: LivingWorld = match ilbm::ILBM::read(&mut reader) {
-            Ok(ilbm) => {
+            Ok(mut ilbm) => {
+                let ilbm_x_aspect = ilbm.header().x_aspect();
+                let ilbm_y_aspect = ilbm.header().y_aspect();
+                if ilbm_x_aspect != 0 && ilbm_y_aspect != 0 && ilbm_x_aspect != ilbm_y_aspect {
+                    x_aspect = ilbm_x_aspect;
+                    y_aspect = ilbm_y_aspect;
+                }
+                if self.options.ilbm_column_swap {
+                    ilbm.column_swap();
+                }
                 let image: CycleImage = ilbm.try_into()?;
                 image.into()
             }
@@ -307,8 +329,10 @@ impl<'font> ColorCycleViewer<'font> {
 
         let mut frame_duration = Duration::from_secs_f64(1.0 / (self.options.fps as f64));
 
-        let img_width = cycle_image.width();
+        let img_width  = cycle_image.width();
         let img_height = cycle_image.height();
+        let fixed_width  = img_width  * x_aspect as u32;
+        let fixed_height = img_height * y_aspect as u32;
 
         let texture_creator = self.canvas.texture_creator();
         let mut texture = texture_creator.create_texture(
@@ -339,7 +363,7 @@ impl<'font> ColorCycleViewer<'font> {
                     (expected_x - win_x).abs() <= display_mode.w / 20 &&
                     (expected_y - win_y).abs() <= display_mode.h / 20;
 
-                window.set_size(img_width, img_height).log_error("window.set_size()");
+                window.set_size(fixed_width, fixed_height).log_error("window.set_size()");
 
                 if is_centered {
                     window.set_position(WindowPos::Centered, WindowPos::Centered);
@@ -670,11 +694,11 @@ impl<'font> ColorCycleViewer<'font> {
             let draw_y;
 
             draw_width = canvas_width;
-            draw_height = img_height * canvas_width / img_width;
+            draw_height = fixed_height * canvas_width / fixed_width;
 
             if self.options.cover {
                 if draw_height < canvas_height {
-                    draw_width = img_width * canvas_height / img_height;
+                    draw_width = fixed_width * canvas_height / fixed_height;
                     draw_height = canvas_height;
                 }
 
@@ -687,24 +711,24 @@ impl<'font> ColorCycleViewer<'font> {
                 } else { 0 };
 
                 if self.was_moved {
-                    let img_min_x = min_x * img_width as i32 / draw_width as i32;
-                    let img_min_y = min_y * img_height as i32 / draw_height as i32;
+                    let img_min_x = min_x * fixed_width as i32 / draw_width as i32;
+                    let img_min_y = min_y * fixed_height as i32 / draw_height as i32;
 
                     self.x = self.x.clamp(img_min_x, 0);
                     self.y = self.y.clamp(img_min_y, 0);
 
-                    draw_x = self.x * draw_width as i32 / img_width as i32;
-                    draw_y = self.y * draw_height as i32 / img_height as i32;
+                    draw_x = self.x * draw_width as i32 / fixed_width as i32;
+                    draw_y = self.y * draw_height as i32 / fixed_height as i32;
                 } else {
                     draw_x = min_x / 2;
                     draw_y = min_y / 2;
 
-                    self.x = draw_x * img_width as i32 / draw_width as i32;
-                    self.y = draw_y * img_height as i32 / draw_height as i32;
+                    self.x = draw_x * fixed_width as i32 / draw_width as i32;
+                    self.y = draw_y * fixed_height as i32 / draw_height as i32;
                 }
             } else {
                 if draw_height > canvas_height {
-                    draw_width = img_width * canvas_height / img_height;
+                    draw_width = fixed_width * canvas_height / fixed_height;
                     draw_height = canvas_height;
                 }
 
@@ -890,21 +914,21 @@ where E: std::fmt::Display {
     #[inline]
     fn log_error(&self, msg: &str) {
         if let Err(err) = self {
-            eprint!("ERROR: {msg}: {}", err);
+            eprintln!("ERROR: {msg}: {}", err);
         }
     }
 
     #[inline]
     fn log_info(&self, msg: &str) {
         if let Err(err) = self {
-            print!("INFO: {msg}: {}", err);
+            println!("INFO: {msg}: {}", err);
         }
     }
 
     #[inline]
     fn log_warning(&self, msg: &str) {
         if let Err(err) = self {
-            print!("WARNING: {msg}: {}", err);
+            println!("WARNING: {msg}: {}", err);
         }
     }
 }
