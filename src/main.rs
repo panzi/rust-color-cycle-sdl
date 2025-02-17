@@ -314,10 +314,10 @@ impl<'font> ColorCycleViewer<'font> {
                 image.into()
             }
             Err(err) => {
-                reader.seek(std::io::SeekFrom::Start(0))?;
                 if err.kind() != ilbm::ErrorKind::UnsupportedFileFormat {
                     return Err(err.into());
                 }
+                reader.seek(std::io::SeekFrom::Start(0))?;
                 serde_json::from_reader(&mut reader)?
             }
         };
