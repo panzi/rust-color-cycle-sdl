@@ -213,11 +213,17 @@ impl BMHD {
             page_heigt,
         })
     }
+}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileType {
+    ILBM,
+    PBM,
 }
 
 #[derive(Debug)]
 pub struct ILBM {
+    file_type: FileType,
     header: BMHD,
     body: Option<BODY>,
     cmaps: Vec<CMAP>,
@@ -227,6 +233,11 @@ pub struct ILBM {
 
 impl ILBM {
     pub const MIN_SIZE: u32 = BMHD::SIZE + 12;
+
+    #[inline]
+    pub fn file_type(&self) -> FileType {
+        self.file_type
+    }
 
     #[inline]
     pub fn header(&self) -> &BMHD {
@@ -289,7 +300,8 @@ impl ILBM {
         reader.read_exact(&mut fourcc)?;
 
         if fourcc != *b"FORM" {
-            return Err(Error::new(ErrorKind::UnsupportedFileFormat, format!("illegal FOURCC: {:?}", fourcc)));
+            return Err(Error::new(ErrorKind::UnsupportedFileFormat,
+                format!("illegal FOURCC: {:?} {:?}", &fourcc, String::from_utf8_lossy(&fourcc))));
         }
 
         let main_chunk_len = read_u32be(reader)?;
@@ -297,9 +309,19 @@ impl ILBM {
             return Err(Error::new(ErrorKind::UnsupportedFileFormat, "file too short"));
         }
 
+        let file_type;
         reader.read_exact(&mut fourcc)?;
-        if fourcc != *b"ILBM" && fourcc != *b"PBM " {
-            return Err(Error::new(ErrorKind::UnsupportedFileFormat, format!("unsupported file format: {:?}", fourcc)));
+        match &fourcc {
+            b"ILBM" => {
+                file_type = FileType::ILBM;
+            }
+            b"PBM " => {
+                file_type = FileType::PBM;
+            }
+            _ => {
+                return Err(Error::new(ErrorKind::UnsupportedFileFormat,
+                    format!("unsupported file format: {:?} {:?}", &fourcc, String::from_utf8_lossy(&fourcc))));
+            }
         }
 
         let mut header = None;
@@ -319,9 +341,10 @@ impl ILBM {
                 }
                 b"BODY" => {
                     let Some(header) = &header else {
-                        return Err(Error::new(ErrorKind::BrokenFile, "BMHD chunk not found before BODY chunk"));
+                        return Err(Error::new(ErrorKind::BrokenFile,
+                            "BMHD chunk not found before BODY chunk"));
                     };
-                    body = Some(BODY::read(reader, chunk_len, header)?);
+                    body = Some(BODY::read(reader, chunk_len, file_type, header)?);
                 }
                 b"CMAP" => {
                     cmaps.push(CMAP::read(reader, chunk_len)?);
@@ -334,6 +357,7 @@ impl ILBM {
                 }
                 _ => {
                     // skip unknown chunk
+                    // eprintln!("skip unsupported chunk: {:?} {:?}", &fourcc, String::from_utf8_lossy(&fourcc));
                     reader.seek_relative(chunk_len.into())?;
                 }
             }
@@ -353,6 +377,7 @@ impl ILBM {
         };
 
         Ok(Self {
+            file_type,
             header,
             body,
             cmaps,
@@ -379,10 +404,17 @@ impl BODY {
         self.mask.as_ref()
     }
 
-    pub fn read<R>(reader: &mut R, chunk_len: u32, header: &BMHD) -> Result<Self>
+    pub fn read<R>(reader: &mut R, chunk_len: u32, file_type: FileType, header: &BMHD) -> Result<Self>
     where R: Read + Seek {
-        // TODO: parse BODY
         let num_planes = header.num_plans() as usize;
+        match num_planes {
+            1 | 4 | 8 => {}
+            _ => {
+                return Err(Error::new(ErrorKind::BrokenFile,
+                    format!("unsupported number of bit planes: {num_planes}")));
+            }
+        }
+        // eprintln!("header: {:?}", header);
         let plane_len = (header.width() as usize + 15) / 16 * 2;
         let mut line_len = num_planes * plane_len;
         if header.mask() == 1 {
@@ -398,17 +430,63 @@ impl BODY {
             None
         };
 
-        fn push_line(pixels: &mut Vec<u8>, mask: &mut Option<BitVec>, line: &[u8], width: u16, plane_len: usize, num_planes: usize) {
-            for x in 0..width {
-                let byte_offset = (x / 8) as usize;
-                let bit_offset = x % 8;
-                let mut value = 0u8;
-                for plane_index in 0..num_planes {
-                    let byte_index = plane_len * plane_index + byte_offset;
-                    let bit = (line[byte_index] >> bit_offset) & 1;
-                    value |= bit << plane_index;
+        fn decode_line(pixels: &mut Vec<u8>, mask: &mut Option<BitVec>, line: &[u8], width: u16, plane_len: usize, num_planes: usize, file_type: FileType) {
+            match file_type {
+                FileType::ILBM => {
+                    for x in 0..width {
+                        let byte_offset = (x / 8) as usize;
+                        let bit_offset = x % 8;
+                        let mut value = 0u8;
+                        for plane_index in 0..num_planes {
+                            let byte_index = plane_len * plane_index + byte_offset;
+                            let bit = (line[byte_index] >> bit_offset) & 1;
+                            value |= bit << plane_index;
+                        }
+                        pixels.push(value);
+                    }
                 }
-                pixels.push(value);
+                FileType::PBM => {
+                    // TODO: test 1 and 4 bits
+                    match num_planes {
+                        1 => {
+                            // XXX: don't know about the bit order!
+                            for byte in &line[..(width / 8) as usize] {
+                                pixels.extend_from_slice(&[
+                                    byte & 1,
+                                    (byte >> 1) & 1,
+                                    (byte >> 2) & 1,
+                                    (byte >> 3) & 1,
+                                    (byte >> 4) & 1,
+                                    (byte >> 5) & 1,
+                                    (byte >> 6) & 1,
+                                    (byte >> 7) & 1,
+                                ]);
+                            }
+                            let rem = width % 8;
+                            if rem > 0 {
+                                let byte = line[(width / 8) as usize];
+                                for bit_index in 0..rem {
+                                    pixels.push((byte >> bit_index) & 1);
+                                }
+                            }
+                        }
+                        4 => {
+                            // XXX: don't know about the nibble order!
+                            for byte in &line[..(width / 2) as usize] {
+                                pixels.extend_from_slice(&[
+                                    byte & 0xF,
+                                    (byte >> 4),
+                                ]);
+                            }
+                        }
+                        8 => {
+                            pixels.extend_from_slice(&line[..width as usize]);
+                        }
+                        _ => {
+                            panic!("unhandled num_planes values: {num_planes}");
+                        }
+                    }
+                }
             }
             if let Some(mask) = mask {
                 let byte_index = plane_len * num_planes;
@@ -427,7 +505,7 @@ impl BODY {
 
                 for _y in 0..header.height() {
                     reader.read_exact(&mut line)?;
-                    push_line(&mut pixels, &mut mask, &line, header.width(), plane_len, num_planes);
+                    decode_line(&mut pixels, &mut mask, &line, header.width(), plane_len, num_planes, file_type);
                 }
 
                 if data_len < chunk_len as usize {
@@ -448,7 +526,7 @@ impl BODY {
                             let next_pos = pos + count;
                             if next_pos > line_len {
                                 return Err(Error::new(ErrorKind::BrokenFile,
-                                    format!("[A] broken BODY compression, more date than fits into row: {} > {}", next_pos, line_len)));
+                                    format!("broken BODY compression, more date than fits into row: {} > {}", next_pos, line_len)));
                             }
                             reader.read_exact(&mut line[pos..next_pos])?;
                             read_len += count;
@@ -460,7 +538,7 @@ impl BODY {
                             let next_pos = pos + count;
                             if next_pos > line_len {
                                 return Err(Error::new(ErrorKind::BrokenFile,
-                                    format!("[B] broken BODY compression, more date than fits into row: {} > {}", next_pos, line_len)));
+                                    format!("broken BODY compression, more date than fits into row: {} > {}", next_pos, line_len)));
                             }
                             line[pos..next_pos].fill(value);
                             pos = next_pos;
@@ -471,7 +549,7 @@ impl BODY {
 
                         line[pos..].fill(0);
                     }
-                    push_line(&mut pixels, &mut mask, &line, header.width(), plane_len, num_planes);
+                    decode_line(&mut pixels, &mut mask, &line, header.width(), plane_len, num_planes, file_type);
                 }
 
                 if read_len > chunk_len as usize {
