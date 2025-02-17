@@ -526,7 +526,7 @@ impl BODY {
                             let next_pos = pos + count;
                             if next_pos > line_len {
                                 return Err(Error::new(ErrorKind::BrokenFile,
-                                    format!("broken BODY compression, more date than fits into row: {} > {}", next_pos, line_len)));
+                                    format!("broken BODY compression, more data than fits into row: {} > {}", next_pos, line_len)));
                             }
                             reader.read_exact(&mut line[pos..next_pos])?;
                             read_len += count;
@@ -538,7 +538,7 @@ impl BODY {
                             let next_pos = pos + count;
                             if next_pos > line_len {
                                 return Err(Error::new(ErrorKind::BrokenFile,
-                                    format!("broken BODY compression, more date than fits into row: {} > {}", next_pos, line_len)));
+                                    format!("broken BODY compression, more data than fits into row: {} > {}", next_pos, line_len)));
                             }
                             line[pos..next_pos].fill(value);
                             pos = next_pos;
