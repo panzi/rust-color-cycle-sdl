@@ -20,8 +20,9 @@ pub mod palette;
 pub mod read;
 pub mod ilbm;
 pub mod bitvec;
+pub mod error;
 
-use std::fmt::{Debug, Write};
+use std::fmt::{Debug, Display, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::fs::File;
@@ -174,26 +175,27 @@ Ctrl+Cursor Right  Move view-port right by 5 pixel");
         ttf: &match sdl2::ttf::init() {
             Ok(ttf) => ttf,
             Err(err) => {
-                show_error(&err.to_string());
+                show_error(err);
                 std::process::exit(1);
             }
         },
     }) {
         Ok(mut viewer) => {
             if let Err(err) = viewer.run() {
-                show_error(&format!("{}: {}", viewer.options.paths[viewer.file_index].to_string_lossy(), err));
+                show_error(format_args!("{}: {}", viewer.options.paths[viewer.file_index].to_string_lossy(), err));
                 std::process::exit(1);
             }
         }
         Err(err) => {
-            show_error(&err.to_string());
+            show_error(err);
             std::process::exit(1);
         }
     }
 }
 
-fn show_error(message: &str) {
-    eprintln!("{}", message);
+fn show_error(message: impl Display) {
+    let message = message.to_string();
+    eprintln!("{}", &message);
     let _ = sdl2::messagebox::show_message_box(
         MessageBoxFlag::ERROR, &[
             sdl2::messagebox::ButtonData {
@@ -201,7 +203,7 @@ fn show_error(message: &str) {
                 flags: MessageBoxButtonFlag::ESCAPEKEY_DEFAULT | MessageBoxButtonFlag::RETURNKEY_DEFAULT,
                 text: "Ok"
             }
-        ], "Error - Color Cycle Viewer", message, None, None);
+        ], "Error - Color Cycle Viewer", &message, None, None);
 }
 
 struct ColorCycleViewerOptions<'font> {
@@ -236,7 +238,7 @@ struct ColorCycleViewer<'font> {
 }
 
 impl<'font> ColorCycleViewer<'font> {
-    pub fn new(options: ColorCycleViewerOptions<'font>) -> Result<ColorCycleViewer, String> {
+    pub fn new(options: ColorCycleViewerOptions<'font>) -> Result<ColorCycleViewer, error::Error> {
         let sdl = sdl2::init()?;
         let video = sdl.video()?;
         let window = video
@@ -246,16 +248,14 @@ impl<'font> ColorCycleViewer<'font> {
             } else { 0 })
             .position_centered()
             .resizable()
-            .build()
-            .map_err(|err| err.to_string())?;
+            .build()?;
         let event_pump = sdl.event_pump()?;
 
         sdl.mouse().show_cursor(false);
 
         let canvas = window.into_canvas()
             .accelerated()
-            .build()
-            .map_err(|err| err.to_string())?;
+            .build()?;
 
         Ok(ColorCycleViewer {
             options,
@@ -276,7 +276,7 @@ impl<'font> ColorCycleViewer<'font> {
         })
     }
 
-    pub fn run(&mut self) -> Result<(), String> {
+    pub fn run(&mut self) -> Result<(), error::Error> {
         loop {
             match self.show_image() {
                 Ok(Action::Goto(index)) => {
@@ -292,9 +292,9 @@ impl<'font> ColorCycleViewer<'font> {
         }
     }
 
-    fn show_image(&mut self) -> Result<Action, String> {
+    fn show_image(&mut self) -> Result<Action, error::Error> {
         let path = &self.options.paths[self.file_index];
-        let file = File::open(path).map_err(|err| err.to_string())?;
+        let file = File::open(path)?;
         let mut reader = BufReader::new(file);
         let mut x_aspect = 1;
         let mut y_aspect = 1;
@@ -314,11 +314,11 @@ impl<'font> ColorCycleViewer<'font> {
                 image.into()
             }
             Err(err) => {
-                reader.seek(std::io::SeekFrom::Start(0)).map_err(|err| err.to_string())?;
+                reader.seek(std::io::SeekFrom::Start(0))?;
                 if err.kind() != ilbm::ErrorKind::UnsupportedFileFormat {
-                    return Err(err.to_string());
+                    return Err(err.into());
                 }
-                serde_json::from_reader(&mut reader).map_err(|err| err.to_string())?
+                serde_json::from_reader(&mut reader)?
             }
         };
         // TODO: implement full worlds demo support
@@ -339,7 +339,7 @@ impl<'font> ColorCycleViewer<'font> {
             PixelFormatEnum::RGB24,
             sdl2::render::TextureAccess::Streaming,
             img_width, img_height
-        ).map_err(|err| err.to_string())?;
+        )?;
 
         let filename = path.file_name().map(|f| f.to_string_lossy()).unwrap_or_else(|| path.to_string_lossy());
 
@@ -768,12 +768,10 @@ impl<'font> ColorCycleViewer<'font> {
                     };
 
                     let surface = font.render(&message)
-                        .shaded(Color::RGB(255, 255, 255), Color::RGB(0, 0, 0))
-                        .map_err(|err| err.to_string())?;
+                        .shaded(Color::RGB(255, 255, 255), Color::RGB(0, 0, 0))?;
 
                     message_texture = Some(texture_creator
-                        .create_texture_from_surface(surface)
-                        .map_err(|err| err.to_string())?);
+                        .create_texture_from_surface(surface)?);
 
                     message_texture.as_ref().unwrap()
                 };

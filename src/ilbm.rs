@@ -777,7 +777,7 @@ impl CCRT {
 }
 
 impl TryFrom<ILBM> for CycleImage {
-    type Error = String;
+    type Error = Error;
 
     fn try_from(ilbm: ILBM) -> std::result::Result<Self, Self::Error> {
         // convert ILBM to LivingWorld
@@ -796,7 +796,7 @@ impl TryFrom<ILBM> for CycleImage {
             if let Some(indexed_image) = IndexedImage::from_buffer(width, height, body.pixels().into(), palette) {
                 indexed_image
             } else {
-                return Err("image buffer is too small for given width/height".to_owned());
+                return Err(Error::new(ErrorKind::BrokenFile, "image buffer is too small for given width/height"));
             }
         } else {
             IndexedImage::new(width, height, palette)
