@@ -801,7 +801,9 @@ impl<'font> ColorCycleViewer<'font> {
                     let font = if let Some(font) = &self.font {
                         font
                     } else {
-                        self.font = Some(self.options.ttf.load_font_from_rwops(RWops::from_bytes(HACK_FONT)?, new_font_size)?);
+                        self.font = Some(self.options.ttf.load_font_from_rwops(
+                            RWops::from_bytes(HACK_FONT)?,
+                            new_font_size)?);
                         self.font_size = new_font_size;
                         self.font.as_ref().unwrap()
                     };
@@ -819,7 +821,7 @@ impl<'font> ColorCycleViewer<'font> {
 
                 self.canvas.copy(&texture, None, Rect::new(
                     ((canvas_width - width) / 2) as i32,
-                    (canvas_height - 2 * height) as i32,
+                    (canvas_height - height - new_font_size as u32) as i32,
                     width, height))?;
             }
 

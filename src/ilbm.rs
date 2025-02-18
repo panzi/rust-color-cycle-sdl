@@ -614,6 +614,114 @@ impl BODY {
                     reader.seek_relative((chunk_len as usize - read_len) as i64)?;
                 }
             }
+            /*
+            2 => {
+                // TODO: https://www.atari-wiki.com/index.php?title=IFF_file_format
+                // eprintln!("header: {header:?}");
+                pixels.resize(header.width() as usize * header.height() as usize, 0);
+
+                let mut fourcc = [0u8; 4];
+                let mut read_len = 0;
+                let mut buf = Vec::new();
+                let mut decompr = Vec::new();
+                for plane_index in 0..num_planes {
+                    reader.read_exact(&mut fourcc)?;
+                    read_len += 4;
+
+                    if fourcc != *b"VDAT" {
+                        return Err(Error::new(
+                            ErrorKind::BrokenFile,
+                            format!("expected \"VDAT\" chunk but got {:?} {:?}",
+                                String::from_utf8_lossy(&fourcc), &fourcc)
+                        ));
+                    }
+
+                    let sub_chunk_len = read_u32be(reader)?;
+                    read_len += 4;
+                    read_len += sub_chunk_len;
+                    if read_len > chunk_len {
+                        return Err(Error::new(
+                            ErrorKind::BrokenFile,
+                            format!("truncated compressed BODY chunk {} < {}", chunk_len, read_len)
+                        ));
+                    }
+
+                    buf.resize(sub_chunk_len as usize, 0u8);
+                    reader.read_exact(&mut buf)?;
+
+                    let cmd_cnt = u16::from_be_bytes([buf[0], buf[1]]);
+                    if cmd_cnt < 2 {
+                        return Err(Error::new(
+                            ErrorKind::BrokenFile,
+                            format!("error in VDAT, cmd_cnt < 2: {cmd_cnt}")
+                        ));
+                    }
+                    let mut data_offset = cmd_cnt as usize ;
+
+                    // TODO: nothing works
+                    decompr.clear();
+                    let mut cmd_index = 2 as usize;
+                    eprintln!("cmd_cnt: {cmd_cnt}, sub_chunk_len: {sub_chunk_len}");
+                    let mut cmd_nr = 0;
+                    while cmd_index < cmd_cnt as usize {
+                        let cmd = i8::from_be_bytes([buf[cmd_index]]);
+                        cmd_index += 1;
+                        cmd_nr += 1;
+
+                        if cmd == 0 {
+                            let count = u16::from_be_bytes([buf[data_offset], buf[data_offset + 1]]);
+                            //let count = u8::from_be_bytes([buf[data_offset]]);
+                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}");
+
+                            data_offset += 2;
+                            //data_offset += 1;
+                            let next_offset = data_offset + count as usize * 2;
+                            decompr.extend_from_slice(&buf[data_offset..next_offset]);
+                            data_offset = next_offset;
+                        } else if cmd == 1 {
+                            let count = u16::from_be_bytes([buf[cmd_index], buf[cmd_index + 1]]);
+                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}");
+
+                            cmd_index += 2;
+                            let data = &buf[data_offset..data_offset + 2];
+                            data_offset += 2;
+                            decompr.reserve(count as usize * 2);
+                            for _ in 0..count {
+                                decompr.extend_from_slice(data);
+                            }
+                        } else if cmd < 0 {
+                            let count = -(cmd as i32);
+                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}");
+
+                            data_offset += 2;
+                            let next_offset = data_offset + count as usize * 2;
+                            decompr.extend_from_slice(&buf[data_offset..next_offset]);
+                            data_offset = next_offset;
+                        } else { // > 2
+                            let count = cmd;
+                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}");
+
+                            let data = &buf[data_offset..data_offset + 2];
+                            data_offset += 2;
+                            decompr.reserve(count as usize * 2);
+                            for _ in 0..count {
+                                decompr.extend_from_slice(data);
+                            }
+                        }
+                    }
+                    eprintln!();
+
+                    // probably all wrong
+                    for index in 0..pixels.len().min(decompr.len() / 8) {
+                        let decompr_index = index / 8;
+                        let bit_index = index % 8;
+                        pixels[index] |= ((decompr[decompr_index] >> bit_index) & 1) << plane_index;
+                    }
+
+                    // TODO: might need to transpose the image?
+                }
+            }
+            // */
             _ => {
                 return Err(Error::new(
                     ErrorKind::UnsupportedFileFormat,
@@ -889,6 +997,14 @@ pub fn read_u8(reader: &mut impl Read) -> Result<u8> {
     reader.read_exact(unsafe { buf.assume_init_mut() })?;
     let buf = unsafe { buf.assume_init_ref() };
     Ok(buf[0])
+}
+
+#[inline]
+pub fn read_i8(reader: &mut impl Read) -> Result<i8> {
+    let mut buf = MaybeUninit::<[u8; 1]>::uninit();
+    reader.read_exact(unsafe { buf.assume_init_mut() })?;
+    let buf = unsafe { buf.assume_init_ref() };
+    Ok(i8::from_be_bytes(*buf))
 }
 
 #[inline]
