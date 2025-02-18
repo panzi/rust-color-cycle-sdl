@@ -27,8 +27,10 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::fs::File;
 use std::io::{BufReader, Seek};
+use std::u64;
 
 use color::Rgb;
+use palette::Palette;
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::{Keycode, Mod};
 use sdl2::messagebox::{MessageBoxButtonFlag, MessageBoxFlag};
@@ -43,7 +45,7 @@ use sdl2::video::{FullscreenType, WindowPos};
 use std::mem::MaybeUninit;
 
 use clap::Parser;
-use image::{CycleImage, LivingWorld};
+use image::{CycleImage, IndexedImage, LivingWorld};
 
 #[cfg(not(windows))]
 use libc;
@@ -153,6 +155,9 @@ W                  Toogle fast forward ({FAST_FORWARD_SPEED}x speed)
 A                  Go back in time by 5 minutes
 D                  Go forward in time by 5 minutes
 S                  Go to current time and continue normal progression
+I                  Reverse pixels in columns of 8.
+                   This is a hack fix for images that appear to be
+                   broken like that.
 Cursor Up          Move view-port up by 1 pixel
 Cursor Down        Move view-port down by 1 pixel
 Cursor Left        Move view-port left by 1 pixel
@@ -237,6 +242,8 @@ struct ColorCycleViewer<'font> {
     event_pump: sdl2::EventPump,
 }
 
+const MESSAGE_DISPLAY_DURATION: Duration = Duration::from_secs(3);
+
 impl<'font> ColorCycleViewer<'font> {
     pub fn new(options: ColorCycleViewerOptions<'font>) -> Result<ColorCycleViewer, error::Error> {
         let sdl = sdl2::init()?;
@@ -294,12 +301,16 @@ impl<'font> ColorCycleViewer<'font> {
 
     fn show_image(&mut self) -> Result<Action, error::Error> {
         let path = &self.options.paths[self.file_index];
+
+        let filename = path.file_name().map(|f| f.to_string_lossy()).unwrap_or_else(|| path.to_string_lossy());
+        self.canvas.window_mut().set_title(&format!("{filename} - Color Cycle Viewer")).log_error("window.set_title()");
+
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
         let mut x_aspect = 1;
         let mut y_aspect = 1;
 
-        let living_world: LivingWorld = match ilbm::ILBM::read(&mut reader) {
+        let living_world: Result<LivingWorld, error::Error> = match ilbm::ILBM::read(&mut reader) {
             Ok(mut ilbm) => {
                 let ilbm_x_aspect = ilbm.header().x_aspect();
                 let ilbm_y_aspect = ilbm.header().y_aspect();
@@ -310,17 +321,61 @@ impl<'font> ColorCycleViewer<'font> {
                 if self.options.ilbm_column_swap {
                     ilbm.column_swap();
                 }
-                let image: CycleImage = ilbm.try_into()?;
-                image.into()
+                let res: Result<CycleImage, _> = ilbm.try_into();
+                match res {
+                    Ok(image) => Ok(image.into()),
+                    Err(err) => Err(err.into())
+                }
             }
             Err(err) => {
                 if err.kind() != ilbm::ErrorKind::UnsupportedFileFormat {
-                    return Err(err.into());
+                    Err(err.into())
+                } else if let Err(err) = reader.seek(std::io::SeekFrom::Start(0)) {
+                    Err(err.into())
+                } else {
+                    match serde_json::from_reader(&mut reader) {
+                        Ok(image) => Ok(image),
+                        Err(err) => Err(err.into())
+                    }
                 }
-                reader.seek(std::io::SeekFrom::Start(0))?;
-                serde_json::from_reader(&mut reader)?
             }
         };
+        drop(reader);
+
+        let mut message = String::new();
+        let mut message_end_ts = Instant::now();
+        let mut living_world = match living_world {
+            Ok(living_world) => {
+                if living_world.base().width() == 0 || living_world.base().height() == 0 {
+                    message_end_ts += Duration::from_secs(1000 * 365 * 24 * 60 * 60);
+                    let _ = write!(message, " {filename}: image of size {} x {} ",
+                        living_world.base().width(),
+                        living_world.base().height());
+                    CycleImage::new(None, IndexedImage::new(640, 480, Palette::default()), Box::new([])).into()
+                } else {
+                    if self.options.osd {
+                        if let Some(name) = living_world.name() {
+                            let _ = write!(message, " {name} ({filename}) ");
+                        } else {
+                            let _ = write!(message, " {filename} ");
+                        }
+                        message_end_ts += MESSAGE_DISPLAY_DURATION
+                    }
+
+                    living_world
+                }
+            },
+            Err(err) => {
+                message_end_ts += Duration::from_secs(1000 * 365 * 24 * 60 * 60);
+                let _ = write!(message, " {filename}: {err} ");
+                CycleImage::new(None, IndexedImage::new(640, 480, Palette::default()), Box::new([])).into()
+            }
+        };
+
+        if let Some(name) = living_world.name() {
+            self.canvas.window_mut().set_title(&format!("{name} ({filename}) - Color Cycle Viewer")).log_error("window.set_title()");
+        }
+
         // TODO: implement full worlds demo support
         let cycle_image = living_world.base();
         let mut blended_palette = cycle_image.palette().clone();
@@ -340,14 +395,6 @@ impl<'font> ColorCycleViewer<'font> {
             sdl2::render::TextureAccess::Streaming,
             img_width, img_height
         )?;
-
-        let filename = path.file_name().map(|f| f.to_string_lossy()).unwrap_or_else(|| path.to_string_lossy());
-
-        if let Some(name) = living_world.name() {
-            self.canvas.window_mut().set_title(&format!("{name} ({filename}) - Color Cycle Viewer"))
-        } else {
-            self.canvas.window_mut().set_title(&format!("{filename} - Color Cycle Viewer"))
-        }.log_error("window.set_title()");
 
         if !self.was_resized {
             if self.canvas.window().fullscreen_state() == FullscreenType::Off {
@@ -371,24 +418,12 @@ impl<'font> ColorCycleViewer<'font> {
             }
         }
 
-        let mut message = String::new();
         let mut message_texture = None;
-        let message_display_duration = Duration::from_secs(3);
 
         self.canvas.set_draw_color(Color::RGBA(0, 0, 0, 255));
         self.canvas.set_integer_scale(true).log_error("canvas.set_integer_scale(true)");
 
         let loop_start_ts = Instant::now();
-        let mut message_end_ts = if self.options.osd {
-            if let Some(name) = living_world.name() {
-                let _ = write!(message, " {name} ({filename}) ");
-            } else {
-                let _ = write!(message, " {filename} ");
-            }
-            loop_start_ts + message_display_duration
-        } else {
-            loop_start_ts
-        };
 
         loop {
             let frame_start_ts = Instant::now();
@@ -401,7 +436,7 @@ impl<'font> ColorCycleViewer<'font> {
             macro_rules! show_message {
                 ($($args:expr),+) => {
                     if self.options.osd {
-                        message_end_ts = frame_start_ts + message_display_duration;
+                        message_end_ts = frame_start_ts + MESSAGE_DISPLAY_DURATION;
                         message.clear();
                         message.push_str(" ");
                         let _ = write!(&mut message, $($args),+);
@@ -564,6 +599,10 @@ impl<'font> ColorCycleViewer<'font> {
                                         show_message!("Fast Forward: OFF");
                                     }
                                 }
+                                Keycode::I => {
+                                    // ILBM column swap
+                                    living_world.column_swap();
+                                }
                                 Keycode::UP => {
                                     self.move_y(get_move_amount(keymod));
                                 }
@@ -666,12 +705,12 @@ impl<'font> ColorCycleViewer<'font> {
 
                 palette = &blended_palette;
             } else {
-                cycled_palette1.apply_cycles_from(&blended_palette, cycle_image.cycles(), blend_cycle, self.options.blend);
+                cycled_palette1.apply_cycles_from(&blended_palette, living_world.base().cycles(), blend_cycle, self.options.blend);
                 palette = &cycled_palette1;
             }
 
             texture.with_lock(None, |pixels, pitch| {
-                let indexed_image = cycle_image.indexed_image();
+                let indexed_image = living_world.base().indexed_image();
                 for y in 0..img_height {
                     let y_offset = y as usize * pitch;
                     for x in 0..img_width {
