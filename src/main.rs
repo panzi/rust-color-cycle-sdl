@@ -820,8 +820,8 @@ impl<'font> ColorCycleViewer<'font> {
                 let TextureQuery { width, height, .. } = texture.query();
 
                 self.canvas.copy(&texture, None, Rect::new(
-                    ((canvas_width - width) / 2) as i32,
-                    (canvas_height - height - new_font_size as u32) as i32,
+                    (canvas_width as i32 - width as i32) / 2,
+                    canvas_height as i32 - height as i32 - new_font_size as i32,
                     width, height))?;
             }
 

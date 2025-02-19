@@ -106,7 +106,7 @@ pub struct BMHD {
     x_aspect: u8,
     y_aspect: u8,
     page_width: i16,
-    page_heigt: i16,
+    page_heigth: i16,
 }
 
 
@@ -169,8 +169,8 @@ impl BMHD {
     }
 
     #[inline]
-    pub fn page_heigt(&self) -> i16 {
-        self.page_heigt
+    pub fn page_heigth(&self) -> i16 {
+        self.page_heigth
     }
 
     pub fn read<R>(reader: &mut R, chunk_len: u32) -> Result<Self>
@@ -192,7 +192,7 @@ impl BMHD {
         let x_aspect = read_u8(reader)?;
         let y_aspect = read_u8(reader)?;
         let page_width = read_i16be(reader)?;
-        let page_heigt = read_i16be(reader)?;
+        let page_heigth = read_i16be(reader)?;
 
         if chunk_len > Self::SIZE {
             // eprintln!("{} unknown bytes in header", (chunk_len - Self::SIZE));
@@ -211,7 +211,7 @@ impl BMHD {
             x_aspect,
             y_aspect,
             page_width,
-            page_heigt,
+            page_heigth,
         })
     }
 }
@@ -560,6 +560,7 @@ impl BODY {
             1 => {
                 // compressed
                 let mut read_len = 0;
+                //eprintln!("{:?}", header);
                 for _y in 0..header.height() {
                     let mut pos = 0;
 
@@ -573,6 +574,8 @@ impl BODY {
                             if next_pos > line_len {
                                 // count = line_len - pos;
                                 // next_pos = line_len;
+                                //eprintln!("broken BODY compression, more data than fits into row: {} > {}", next_pos, line_len);
+                                //break;
                                 return Err(Error::new(ErrorKind::BrokenFile,
                                     format!("broken BODY compression, more data than fits into row: {} > {}", next_pos, line_len)));
                             }
@@ -588,6 +591,8 @@ impl BODY {
                             if next_pos > line_len {
                                 // count = line_len - pos;
                                 // next_pos = line_len;
+                                //eprintln!("broken BODY compression, more data than fits into row: {} > {}", next_pos, line_len);
+                                //break;
                                 return Err(Error::new(ErrorKind::BrokenFile,
                                     format!("broken BODY compression, more data than fits into row: {} > {}", next_pos, line_len)));
                             }
@@ -614,7 +619,7 @@ impl BODY {
                     reader.seek_relative((chunk_len as usize - read_len) as i64)?;
                 }
             }
-            /*
+            //*
             2 => {
                 // TODO: https://www.atari-wiki.com/index.php?title=IFF_file_format
                 // eprintln!("header: {header:?}");
@@ -623,7 +628,7 @@ impl BODY {
                 let mut fourcc = [0u8; 4];
                 let mut read_len = 0;
                 let mut buf = Vec::new();
-                let mut decompr = Vec::new();
+                let mut decompr = Vec::with_capacity((header.width() as usize * header.height() as usize + 7) / 8);
                 for plane_index in 0..num_planes {
                     reader.read_exact(&mut fourcc)?;
                     read_len += 4;
@@ -656,70 +661,79 @@ impl BODY {
                             format!("error in VDAT, cmd_cnt < 2: {cmd_cnt}")
                         ));
                     }
-                    let mut data_offset = cmd_cnt as usize ;
+                    let mut data_offset = cmd_cnt as usize;
 
                     // TODO: nothing works
                     decompr.clear();
                     let mut cmd_index = 2 as usize;
-                    eprintln!("cmd_cnt: {cmd_cnt}, sub_chunk_len: {sub_chunk_len}");
+                    eprintln!("cmd_cnt: {cmd_cnt}, sub_chunk_len: {sub_chunk_len}, pixels.len(): {}", pixels.len());
                     let mut cmd_nr = 0;
                     while cmd_index < cmd_cnt as usize {
-                        let cmd = i8::from_be_bytes([buf[cmd_index]]);
-                        cmd_index += 1;
+                        let cmd = buf[cmd_index] as i8;
+                        cmd_index += 2;
                         cmd_nr += 1;
 
                         if cmd == 0 {
                             let count = u16::from_be_bytes([buf[data_offset], buf[data_offset + 1]]);
                             //let count = u8::from_be_bytes([buf[data_offset]]);
-                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}");
+                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
 
                             data_offset += 2;
-                            //data_offset += 1;
                             let next_offset = data_offset + count as usize * 2;
-                            decompr.extend_from_slice(&buf[data_offset..next_offset]);
+                            decompr.extend_from_slice(&buf[data_offset..next_offset.min(buf.len())]); // XXX
                             data_offset = next_offset;
                         } else if cmd == 1 {
-                            let count = u16::from_be_bytes([buf[cmd_index], buf[cmd_index + 1]]);
-                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}");
+                            let count = u16::from_be_bytes([buf[data_offset], buf[data_offset + 1]]);
+                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
 
-                            cmd_index += 2;
-                            let data = &buf[data_offset..data_offset + 2];
                             data_offset += 2;
-                            decompr.reserve(count as usize * 2);
+                            let data = &buf[data_offset..(data_offset + 2)];
+                            data_offset += 2;
                             for _ in 0..count {
                                 decompr.extend_from_slice(data);
                             }
                         } else if cmd < 0 {
                             let count = -(cmd as i32);
-                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}");
+                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
 
                             data_offset += 2;
                             let next_offset = data_offset + count as usize * 2;
                             decompr.extend_from_slice(&buf[data_offset..next_offset]);
                             data_offset = next_offset;
-                        } else { // > 2
+                        } else { // > 1
                             let count = cmd;
-                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}");
+                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
 
-                            let data = &buf[data_offset..data_offset + 2];
+                            let data = &buf[data_offset..(data_offset + 2)];
                             data_offset += 2;
-                            decompr.reserve(count as usize * 2);
                             for _ in 0..count {
                                 decompr.extend_from_slice(data);
                             }
                         }
+                        if data_offset >= buf.len() {
+                            break;
+                        }
                     }
+                    eprintln!("pixels.len(): {}, decompr.len(): {}, decompr.len() * 8: {}",
+                        pixels.len(), decompr.len(), decompr.len() * 8);
                     eprintln!();
 
                     // probably all wrong
-                    for index in 0..pixels.len().min(decompr.len() / 8) {
+                    for index in 0..pixels.len().min(decompr.len() * 8) {
                         let decompr_index = index / 8;
                         let bit_index = index % 8;
                         pixels[index] |= ((decompr[decompr_index] >> bit_index) & 1) << plane_index;
                     }
-
-                    // TODO: might need to transpose the image?
                 }
+                // XXX: do I need to transpose the image?
+                // TODO: if yes do it in decompr loop wihtout additional allocation
+                // let mut new_pixels = Vec::with_capacity(pixels.len());
+                // for y in 0..header.height() {
+                //     for x in 0..header.width() {
+                //         new_pixels.push(pixels[x as usize * header.height() as usize + y as usize]);
+                //     }
+                // }
+                // pixels = new_pixels;
             }
             // */
             _ => {
