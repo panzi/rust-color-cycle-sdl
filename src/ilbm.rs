@@ -626,7 +626,7 @@ impl BODY {
                 pixels.resize(header.width() as usize * header.height() as usize, 0);
 
                 let mut fourcc = [0u8; 4];
-                let mut read_len = 0;
+                let mut read_len = 0usize;
                 let mut buf = Vec::new();
                 let mut decompr = Vec::with_capacity((header.width() as usize * header.height() as usize + 7) / 8);
                 for plane_index in 0..num_planes {
@@ -643,8 +643,8 @@ impl BODY {
 
                     let sub_chunk_len = read_u32be(reader)?;
                     read_len += 4;
-                    read_len += sub_chunk_len;
-                    if read_len > chunk_len {
+                    read_len += sub_chunk_len as usize;
+                    if read_len > chunk_len as usize {
                         return Err(Error::new(
                             ErrorKind::BrokenFile,
                             format!("truncated compressed BODY chunk {} < {}", chunk_len, read_len)
@@ -670,21 +670,20 @@ impl BODY {
                     let mut cmd_nr = 0;
                     while cmd_index < cmd_cnt as usize {
                         let cmd = buf[cmd_index] as i8;
-                        cmd_index += 2;
+                        cmd_index += 1;
                         cmd_nr += 1;
 
-                        if cmd == 0 {
+                        if cmd == 0 { // load count from data, COPY
                             let count = u16::from_be_bytes([buf[data_offset], buf[data_offset + 1]]);
-                            //let count = u8::from_be_bytes([buf[data_offset]]);
-                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
+                            eprintln!("{cmd_nr:2} cmd: {cmd:4}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
 
                             data_offset += 2;
                             let next_offset = data_offset + count as usize * 2;
                             decompr.extend_from_slice(&buf[data_offset..next_offset.min(buf.len())]); // XXX
                             data_offset = next_offset;
-                        } else if cmd == 1 {
+                        } else if cmd == 1 { // load count from data, RLE
                             let count = u16::from_be_bytes([buf[data_offset], buf[data_offset + 1]]);
-                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
+                            eprintln!("{cmd_nr:2} cmd: {cmd:4}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
 
                             data_offset += 2;
                             let data = &buf[data_offset..(data_offset + 2)];
@@ -692,17 +691,16 @@ impl BODY {
                             for _ in 0..count {
                                 decompr.extend_from_slice(data);
                             }
-                        } else if cmd < 0 {
+                        } else if cmd < 0 { // count = -cmd, COPY
                             let count = -(cmd as i32);
-                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
+                            eprintln!("{cmd_nr:2} cmd: {cmd:4}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
 
-                            data_offset += 2;
                             let next_offset = data_offset + count as usize * 2;
                             decompr.extend_from_slice(&buf[data_offset..next_offset]);
                             data_offset = next_offset;
-                        } else { // > 1
+                        } else { // cmd > 1: count = cmd, RLE
                             let count = cmd;
-                            eprintln!("{cmd_nr:2} cmd: {cmd:3}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
+                            eprintln!("{cmd_nr:2} cmd: {cmd:4}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
 
                             let data = &buf[data_offset..(data_offset + 2)];
                             data_offset += 2;
@@ -710,20 +708,40 @@ impl BODY {
                                 decompr.extend_from_slice(data);
                             }
                         }
+                        // XXX
                         if data_offset >= buf.len() {
+                            eprintln!("early break: data_offset >= buf.len() ({} >= {})", data_offset, buf.len());
                             break;
                         }
                     }
-                    eprintln!("pixels.len(): {}, decompr.len(): {}, decompr.len() * 8: {}",
-                        pixels.len(), decompr.len(), decompr.len() * 8);
+                    eprintln!("pixels.len(): {}, decompr.len(): {}, decompr.len() * 8: {}, cmd_cnt - cmd_index: {}",
+                        pixels.len(), decompr.len(), decompr.len() * 8, cmd_cnt as usize - cmd_index);
                     eprintln!();
 
                     // probably all wrong
-                    for index in 0..pixels.len().min(decompr.len() * 8) {
-                        let decompr_index = index / 8;
-                        let bit_index = index % 8;
-                        pixels[index] |= ((decompr[decompr_index] >> bit_index) & 1) << plane_index;
+                    let width = header.width() as usize;
+                    let height = header.height() as usize;
+                    for (byte_index, value) in decompr.iter().cloned().enumerate() {
+                        let bit_index = byte_index * 8;
+                        let x = bit_index / height;
+                        let y = bit_index % height;
+
+                        for bit in 0..8 {
+                            let pixel_index = (y + bit) * width + x;
+                            if pixel_index >= pixels.len() {
+                                eprintln!("pixel_index >= pixels.len(): {} >= {}", pixel_index, pixels.len());
+                                break;
+                            }
+                            pixels[pixel_index] |= ((value >> (7 - bit)) & 1) << plane_index;
+                            //pixels[pixel_index] = 1;
+                        }
                     }
+
+                    // for index in 0..pixels.len().min(decompr.len() * 8) {
+                    //     let decompr_index = index / 8;
+                    //     let bit_index = index % 8;
+                    //     pixels[index] |= ((decompr[decompr_index] >> bit_index) & 1) << plane_index;
+                    // }
                 }
                 // XXX: do I need to transpose the image?
                 // TODO: if yes do it in decompr loop wihtout additional allocation
@@ -734,6 +752,10 @@ impl BODY {
                 //     }
                 // }
                 // pixels = new_pixels;
+
+                if read_len < chunk_len as usize {
+                    reader.seek_relative((chunk_len as usize - read_len) as i64)?;
+                }
             }
             // */
             _ => {
