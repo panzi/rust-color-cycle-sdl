@@ -51,11 +51,13 @@ use image::{CycleImage, IndexedImage, LivingWorld};
 use libc;
 
 const MAX_FPS: u32 = 10_000;
-const TIME_STEP: u64 = 60 * 5 * 1000;
+const TIME_STEP: u64 = 5 * 60 * 1000;
+const SMALL_TIME_STEP: u64 = 60 * 1000;
 const DAY_DURATION: u64 = 24 * 60 * 60 * 1000;
 const FAST_FORWARD_SPEED: u64 = 10_000;
 
 const HACK_FONT: &[u8] = include_bytes!("../assets/Hack-Regular.ttf");
+const APP_NAME: &str = "Color Cycle Viewer";
 
 fn interruptable_sleep(duration: Duration) -> bool {
     #[cfg(unix)]
@@ -144,7 +146,9 @@ P                  Open previous file
 F or F11           Toggle full-screen
 W                  Toogle fast forward ({FAST_FORWARD_SPEED}x speed)
 A                  Go back in time by 5 minutes
+Shift+A            Go back in time by 1 minute
 D                  Go forward in time by 5 minutes
+Shift+D            Go forward in time by 1 minute
 S                  Go to current time and continue normal progression
 I                  Reverse pixels in columns of 8.
                    This is a hack fix for images that appear to be
@@ -198,7 +202,7 @@ fn show_error(message: impl Display) {
                 flags: MessageBoxButtonFlag::ESCAPEKEY_DEFAULT | MessageBoxButtonFlag::RETURNKEY_DEFAULT,
                 text: "Ok"
             }
-        ], "Error - Color Cycle Viewer", &message, None, None);
+        ], &format!("Error - {APP_NAME}"), &message, None, None);
 }
 
 struct ColorCycleViewerOptions<'font> {
@@ -239,7 +243,7 @@ impl<'font> ColorCycleViewer<'font> {
         let sdl = sdl2::init()?;
         let video = sdl.video()?;
         let window = video
-            .window("Color Cycle Viewer", 640, 480)
+            .window(APP_NAME, 640, 480)
             .set_window_flags(if options.full_screen {
                 SDL_WindowFlags::SDL_WINDOW_FULLSCREEN_DESKTOP as u32
             } else { 0 })
@@ -297,7 +301,7 @@ impl<'font> ColorCycleViewer<'font> {
         let path = &self.options.paths[self.file_index];
 
         let filename = path.file_name().map(|f| f.to_string_lossy()).unwrap_or_else(|| path.to_string_lossy());
-        self.canvas.window_mut().set_title(&format!("{filename} - Color Cycle Viewer")).log_error("window.set_title()");
+        self.canvas.window_mut().set_title(&format!("{filename} - {APP_NAME}")).log_error("window.set_title()");
 
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
@@ -373,20 +377,23 @@ impl<'font> ColorCycleViewer<'font> {
             }
         };
 
-        if let Some(name) = living_world.name() {
-            self.canvas.window_mut().set_title(&format!("{name} ({filename}) - Color Cycle Viewer")).log_error("window.set_title()");
-        }
+        let cycle_image = living_world.base();
+        let img_width  = cycle_image.width();
+        let img_height = cycle_image.height();
+
+        self.canvas.window_mut().set_title(&if let Some(name) = living_world.name() {
+            format!("{name} ({filename}) - {img_width}x{img_height} - {APP_NAME}")
+        } else {
+            format!("{filename} - {img_width}x{img_height} - {APP_NAME}")
+        }).log_error("window.set_title()");
 
         // TODO: implement full worlds demo support
-        let cycle_image = living_world.base();
         let mut blended_palette = cycle_image.palette().clone();
         let mut cycled_palette1 = blended_palette.clone();
         let mut cycled_palette2 = blended_palette.clone();
 
         let mut frame_duration = Duration::from_secs_f64(1.0 / (self.options.fps as f64));
 
-        let img_width  = cycle_image.width();
-        let img_height = cycle_image.height();
         let fixed_width  = img_width  * x_aspect as u32;
         let fixed_height = img_height * y_aspect as u32;
 
@@ -537,13 +544,14 @@ impl<'font> ColorCycleViewer<'font> {
                                 }
                                 Keycode::A => {
                                     // back in time
-                                    let rem = time_of_day % TIME_STEP;
+                                    let time_step = if keymod.bits() & SHIFT != 0 { SMALL_TIME_STEP } else { TIME_STEP };
+                                    let rem = time_of_day % time_step;
                                     let new_time = time_of_day - rem;
                                     if new_time == time_of_day {
-                                        if new_time < TIME_STEP {
-                                            time_of_day = DAY_DURATION - TIME_STEP;
+                                        if new_time < time_step {
+                                            time_of_day = DAY_DURATION - time_step;
                                         } else {
-                                            time_of_day = new_time - TIME_STEP;
+                                            time_of_day = new_time - time_step;
                                         }
                                     } else {
                                         time_of_day = new_time;
@@ -555,8 +563,9 @@ impl<'font> ColorCycleViewer<'font> {
                                 }
                                 Keycode::D => {
                                     // forward in time
-                                    let rem = time_of_day % TIME_STEP;
-                                    let new_time = time_of_day - rem + TIME_STEP;
+                                    let time_step = if keymod.bits() & SHIFT != 0 { SMALL_TIME_STEP } else { TIME_STEP };
+                                    let rem = time_of_day % time_step;
+                                    let new_time = time_of_day - rem + time_step;
                                     if new_time >= DAY_DURATION {
                                         time_of_day = 0;
                                     } else {
@@ -875,7 +884,7 @@ impl<'font> ColorCycleViewer<'font> {
 }
 
 // const ALT: u16 = Mod::LALTMOD.bits() | Mod::RALTMOD.bits();
-// const SHIFT: u16 = Mod::LSHIFTMOD.bits() | Mod::RSHIFTMOD.bits();
+const SHIFT: u16 = Mod::LSHIFTMOD.bits() | Mod::RSHIFTMOD.bits();
 const CTRL: u16 = Mod::LCTRLMOD.bits() | Mod::RCTRLMOD.bits();
 
 #[inline]

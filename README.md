@@ -82,8 +82,10 @@ Options:
 | `-` | Decrease frames per second by 1 |
 | `F` or `F11` | Toggle full-screen |
 | `W` | Toogle fast forward (10000x speed) |
-| `A` | Go back in time by 5 minutes |
-| `D` | Go forward in time by 5 minutes |
+| `A`         | Go back in time by 5 minutes |
+| `Shift`+`A` | Go back in time by 1 minute |
+| `D`         | Go forward in time by 5 minutes |
+| `Shift`+`D` | Go forward in time by 1 minute |
 | `S` | Go to current time and continue normal progression |
 | `I` | Reverse pixels in columns of 8.<br>This is a hack fix for images that appear to be broken like that. |
 | `Cursor Up`    | Move view-port up by 1 pixel |
