@@ -31,15 +31,16 @@ use std::u64;
 
 use color::Rgb;
 use palette::Palette;
-use sdl2::event::{Event, WindowEvent};
-use sdl2::keyboard::{Keycode, Mod};
-use sdl2::messagebox::{MessageBoxButtonFlag, MessageBoxFlag};
-use sdl2::pixels::{Color, PixelFormatEnum};
-use sdl2::rect::Rect;
-use sdl2::render::TextureQuery;
-use sdl2::rwops::RWops;
-use sdl2::sys::SDL_WindowFlags;
-use sdl2::video::{FullscreenType, WindowPos};
+use sdl3::event::{Event, WindowEvent};
+use sdl3::keyboard::{Keycode, Mod};
+use sdl3::messagebox::{MessageBoxButtonFlag, MessageBoxFlag};
+use sdl3::pixels::{Color, PixelFormat};
+use sdl3::rect::Rect;
+use sdl3::render::TextureQuery;
+use sdl3::rwops::RWops;
+use sdl3::sys::pixels::SDL_PixelFormat;
+use sdl3::sys::SDL_WindowFlags;
+use sdl3::video::{FullscreenType, WindowPos};
 
 #[cfg(not(windows))]
 use std::mem::MaybeUninit;
@@ -171,7 +172,7 @@ Ctrl+Cursor Right  Move view-port right by 5 pixel");
         full_screen: args.full_screen,
         cover: args.cover,
         paths: args.paths,
-        ttf: &match sdl2::ttf::init() {
+        ttf: &match sdl3::ttf::init() {
             Ok(ttf) => ttf,
             Err(err) => {
                 show_error(err);
@@ -195,9 +196,9 @@ Ctrl+Cursor Right  Move view-port right by 5 pixel");
 fn show_error(message: impl Display) {
     let message = message.to_string();
     eprintln!("{}", &message);
-    let _ = sdl2::messagebox::show_message_box(
+    let _ = sdl3::messagebox::show_message_box(
         MessageBoxFlag::ERROR, &[
-            sdl2::messagebox::ButtonData {
+            sdl3::messagebox::ButtonData {
                 button_id: 0,
                 flags: MessageBoxButtonFlag::ESCAPEKEY_DEFAULT | MessageBoxButtonFlag::RETURNKEY_DEFAULT,
                 text: "Ok"
@@ -212,7 +213,7 @@ struct ColorCycleViewerOptions<'font> {
     paths: Vec<PathBuf>,
     full_screen: bool,
     cover: bool,
-    ttf: &'font sdl2::ttf::Sdl2TtfContext,
+    ttf: &'font sdl3::ttf::sdl3TtfContext,
 }
 
 struct ColorCycleViewer<'font> {
@@ -226,13 +227,13 @@ struct ColorCycleViewer<'font> {
     y: i32,
 
     #[allow(unused)]
-    sdl: sdl2::Sdl,
-    font: Option<sdl2::ttf::Font<'font, 'static>>,
+    sdl: sdl3::Sdl,
+    font: Option<sdl3::ttf::Font<'font, 'static>>,
     font_size: u16,
     #[allow(unused)]
-    video: sdl2::VideoSubsystem,
-    canvas: sdl2::render::WindowCanvas,
-    event_pump: sdl2::EventPump,
+    video: sdl3::VideoSubsystem,
+    canvas: sdl3::render::WindowCanvas,
+    event_pump: sdl3::EventPump,
 }
 
 const MESSAGE_DISPLAY_DURATION: Duration = Duration::from_secs(3);
@@ -240,7 +241,7 @@ const ERROR_MESSAGE_DISPLAY_DURATION: Duration = Duration::from_secs(1000 * 365 
 
 impl<'font> ColorCycleViewer<'font> {
     pub fn new(options: ColorCycleViewerOptions<'font>) -> Result<ColorCycleViewer, error::Error> {
-        let sdl = sdl2::init()?;
+        let sdl = sdl3::init()?;
         let video = sdl.video()?;
         let window = video
             .window(APP_NAME, 640, 480)
@@ -249,14 +250,13 @@ impl<'font> ColorCycleViewer<'font> {
             } else { 0 })
             .position_centered()
             .resizable()
+            .vulkan()
             .build()?;
         let event_pump = sdl.event_pump()?;
 
         sdl.mouse().show_cursor(false);
 
-        let canvas = window.into_canvas()
-            .accelerated()
-            .build()?;
+        let canvas = window.into_canvas();
 
         Ok(ColorCycleViewer {
             options,
@@ -399,36 +399,39 @@ impl<'font> ColorCycleViewer<'font> {
 
         let texture_creator = self.canvas.texture_creator();
         let mut texture = texture_creator.create_texture(
-            PixelFormatEnum::RGB24,
-            sdl2::render::TextureAccess::Streaming,
+            unsafe { PixelFormat::from_ll(SDL_PixelFormat::RGB24) },
+            sdl3::render::TextureAccess::Streaming,
             img_width, img_height
         )?;
+        texture.set_scale_mode(sdl3::render::ScaleMode::Nearest);
 
         if !self.was_resized {
             if self.canvas.window().fullscreen_state() == FullscreenType::Off {
                 // Guess if the window is approximately cnetered on the screen and
                 // if yes, then re-center after resizing.
                 let window = self.canvas.window_mut();
-                let display_mode = self.video.current_display_mode(window.display_index()?)?;
-                let (win_width, win_height) = window.size();
-                let (win_x, win_y) = window.position();
-                let expected_x = (display_mode.w - win_width  as i32) / 2;
-                let expected_y = (display_mode.h - win_height as i32) / 2;
-                let is_centered =
-                    (expected_x - win_x).abs() <= display_mode.w / 20 &&
-                    (expected_y - win_y).abs() <= display_mode.h / 20;
+                
+                if let Some(display_mode) = window.display_mode() {
+                    let (win_width, win_height) = window.size();
+                    let (win_x, win_y) = window.position();
+                    let expected_x = (display_mode.w - win_width  as i32) / 2;
+                    let expected_y = (display_mode.h - win_height as i32) / 2;
+                    let is_centered =
+                        (expected_x - win_x).abs() <= display_mode.w / 20 &&
+                        (expected_y - win_y).abs() <= display_mode.h / 20;
 
-                window.set_size(fixed_width, fixed_height).log_error("window.set_size()");
+                    window.set_size(fixed_width, fixed_height).log_error("window.set_size()");
 
-                if is_centered {
-                    window.set_position(WindowPos::Centered, WindowPos::Centered);
+                    if is_centered {
+                        window.set_position(WindowPos::Centered, WindowPos::Centered);
+                    }
+                } else {
+                    window.set_size(fixed_width, fixed_height).log_error("window.set_size()");
                 }
             }
         }
 
         let mut message_texture = None;
-
-        self.canvas.set_integer_scale(true).log_error("canvas.set_integer_scale(true)");
 
         let loop_start_ts = Instant::now();
 
@@ -474,12 +477,12 @@ impl<'font> ColorCycleViewer<'font> {
                                     // quit
                                     return Ok(Action::Quit);
                                 }
-                                Keycode::ESCAPE => {
+                                Keycode::Escape => {
                                     let window = self.canvas.window_mut();
                                     if window.fullscreen_state() == FullscreenType::Off {
                                         return Ok(Action::Quit);
                                     }
-                                    window.set_fullscreen(FullscreenType::Off)?;
+                                    window.set_fullscreen(false)?;
                                 }
                                 Keycode::B => {
                                     // toggle blend mode
@@ -507,7 +510,7 @@ impl<'font> ColorCycleViewer<'font> {
                                         show_message!("OSD: Enabled");
                                     }
                                 }
-                                Keycode::PLUS | Keycode::KP_PLUS => {
+                                Keycode::Plus | Keycode::KpPlus => {
                                     // increase FPS
                                     if self.options.fps < MAX_FPS {
                                         self.options.fps += 1;
@@ -516,7 +519,7 @@ impl<'font> ColorCycleViewer<'font> {
                                         show_message!("FPS: {}", self.options.fps);
                                     }
                                 }
-                                Keycode::MINUS | Keycode::KP_MINUS => {
+                                Keycode::Minus | Keycode::KpMinus => {
                                     // decrease FPS
                                     if self.options.fps > 1 {
                                         self.options.fps -= 1;
@@ -589,8 +592,8 @@ impl<'font> ColorCycleViewer<'font> {
                                     if !repeat {
                                         let window = self.canvas.window_mut();
                                         let value = match window.fullscreen_state() {
-                                            FullscreenType::Desktop | FullscreenType::True => FullscreenType::Off,
-                                            FullscreenType::Off => FullscreenType::Desktop,
+                                            FullscreenType::Desktop | FullscreenType::True => false,
+                                            FullscreenType::Off => true,
                                         };
                                         window.set_fullscreen(value).log_error("window.set_fullscreen()");
                                     }
@@ -612,19 +615,19 @@ impl<'font> ColorCycleViewer<'font> {
                                     // ILBM column swap
                                     living_world.column_swap();
                                 }
-                                Keycode::UP => {
+                                Keycode::Up => {
                                     self.move_y(get_move_amount(keymod));
                                 }
-                                Keycode::DOWN => {
+                                Keycode::Down => {
                                     self.move_y(-get_move_amount(keymod));
                                 }
-                                Keycode::LEFT => {
+                                Keycode::Left => {
                                     self.move_x(get_move_amount(keymod));
                                 }
-                                Keycode::RIGHT => {
+                                Keycode::Right => {
                                     self.move_x(-get_move_amount(keymod));
                                 }
-                                Keycode::HOME => {
+                                Keycode::Home => {
                                     if self.options.cover {
                                         if keymod.bits() & CTRL != 0 {
                                             self.y = 0;
@@ -634,7 +637,7 @@ impl<'font> ColorCycleViewer<'font> {
                                         self.was_moved = true;
                                     }
                                 }
-                                Keycode::END => {
+                                Keycode::End => {
                                     if self.options.cover {
                                         if keymod.bits() & CTRL != 0 {
                                             self.y = i32::MIN;
@@ -644,17 +647,15 @@ impl<'font> ColorCycleViewer<'font> {
                                         self.was_moved = true;
                                     }
                                 }
-                                Keycode::KP_0 | Keycode::NUM_0 => {
+                                Keycode::Kp0 => { // TODO: is Keycode::_0 numpad now?
                                     return Ok(Action::Goto(self.options.paths.len() - 1));
                                 }
-                                Keycode::KP_1 | Keycode::NUM_1 => {
+                                Keycode::Kp0 => {
                                     return Ok(Action::Goto(0));
                                 }
                                 _ => {
-                                    let index = if keycode.into_i32() >= Keycode::KP_2.into_i32() && keycode.into_i32() <= Keycode::KP_9.into_i32() {
-                                        keycode.into_i32() - Keycode::KP_1.into_i32()
-                                    } else if keycode.into_i32() >= Keycode::NUM_2.into_i32() && keycode.into_i32() <= Keycode::NUM_9.into_i32() {
-                                        keycode.into_i32() - Keycode::NUM_1.into_i32()
+                                    let index = if keycode.into() >= Keycode::Kp2.into() && keycode.into() <= Keycode::Kp9.into() {
+                                        keycode.into() - Keycode::Kp1.into()
                                     } else {
                                         0
                                     };

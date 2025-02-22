@@ -16,7 +16,7 @@
 
 use std::fmt::Display;
 
-use sdl2::{render::TextureValueError, ttf::FontError, video::WindowBuildError, IntegerOrSdlError};
+use sdl3::{render::TextureValueError, ttf::FontError, video::WindowBuildError, IntegerOrSdlError};
 
 #[derive(Debug)]
 pub struct Error {
@@ -116,6 +116,12 @@ impl From<IntegerOrSdlError> for Error {
     }
 }
 
+impl From<sdl3::Error> for Error {
+    #[inline]
+    fn from(value: sdl3::Error) -> Self {
+        Self::with_cause("SDL error", Box::new(value))
+    }
+}
 
 impl From<String> for Error {
     #[inline]
