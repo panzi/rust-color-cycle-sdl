@@ -96,3 +96,8 @@ Options:
 | `Ctrl`+`Cursor Down`  | Move view-port down by 5 pixel |
 | `Ctrl`+`Cursor Left`  | Move view-port left by 5 pixel |
 | `Ctrl`+`Cursor Right` | Move view-port right by 5 pixel |
+
+## See Also
+
+[The same tool](https://github.com/panzi/rust-color-cycle), just it displays the
+images in the terminal using Unicode and ANSI color escape sequences.
