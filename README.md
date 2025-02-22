@@ -10,7 +10,8 @@ I'll add that at some later time).
 This viewer reads [Living Worlds Maker](https://magrathea.onrender.com/)
 files (only the background layer) or JSON files similar to what the
 [Canvas Cycle](https://experiments.withgoogle.com/canvas-cycle) demo
-by Joseph Huckaby uses.
+by Joseph Huckaby uses. It can also directly read binary
+[ILBM](https://en.wikipedia.org/wiki/ILBM) files with `CRNG` chunks.
 
 Short demo video:
 [![Preview screenshot of short demo video](https://i3.ytimg.com/vi/Fdk7anwM7f0/maxresdefault.jpg)](https://www.youtube.com/watch?v=Fdk7anwM7f0)
@@ -53,14 +54,6 @@ Options:
           doesn't have the same aspect ratio as the animation. With this option the
           animation is zoomed in so that it will cover the window and will crop out parts
           of the animation.
-
-      --ilbm-column-swap
-          Swap direction of 8 pixel columns.
-
-          The current implementation of ILBM files is broken for some files and swaps the
-          pixels in columns like that. I haven't figured out how do load those files
-          correctly (how to detect its such a file), but this option can be used to fix the
-          display of those files.
 
       --help-hotkeys
           Show list of hotkeys

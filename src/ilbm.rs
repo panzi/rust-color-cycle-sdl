@@ -102,6 +102,7 @@ pub struct BMHD {
     num_planes: u8,
     mask: u8,
     compression: u8,
+    flags: u8,
     trans_color: u16,
     x_aspect: u8,
     y_aspect: u8,
@@ -149,6 +150,11 @@ impl BMHD {
     }
 
     #[inline]
+    pub fn flags(&self) -> u8 {
+        self.flags
+    }
+
+    #[inline]
     pub fn trans_color(&self) -> u16 {
         self.trans_color
     }
@@ -187,7 +193,7 @@ impl BMHD {
         let num_planes = read_u8(reader)?;
         let mask = read_u8(reader)?;
         let compression = read_u8(reader)?;
-        let _pad1 = read_u8(reader)?;
+        let flags = read_u8(reader)?;
         let trans_color = read_u16be(reader)?;
         let x_aspect = read_u8(reader)?;
         let y_aspect = read_u8(reader)?;
@@ -207,6 +213,7 @@ impl BMHD {
             num_planes,
             mask,
             compression,
+            flags,
             trans_color,
             x_aspect,
             y_aspect,
@@ -348,6 +355,7 @@ impl ILBM {
         let mut ccrts = Vec::new();
         let mut camg = None;
 
+        // eprintln!("type: {file_type}");
         let mut pos = 4;
         while pos < main_chunk_len {
             reader.read_exact(&mut fourcc)?;
@@ -357,6 +365,7 @@ impl ILBM {
             match &fourcc {
                 b"BMHD" => {
                     header = Some(BMHD::read(reader, chunk_len)?);
+                    // eprintln!("{:?}", header.as_ref().unwrap());
                 }
                 b"BODY" => {
                     let Some(header) = &header else {
@@ -376,6 +385,7 @@ impl ILBM {
                 }
                 b"CAMG" => {
                     camg = Some(CAMG::read(reader, chunk_len)?);
+                    // eprintln!("{:?}", camg.as_ref().unwrap());
                 }
                 _ => {
                     // skip unknown chunk
@@ -387,7 +397,7 @@ impl ILBM {
             if chunk_len & 1 != 0 {
                 // Chunks are always padded to an even number of bytes.
                 // This padding byte is not included in the chunk size.
-                let _pad = read_u8(reader)?;
+                let _ = read_u8(reader)?;
                 pos += 1;
             }
 
@@ -484,7 +494,7 @@ impl BODY {
                         let mut value = 0u8;
                         for plane_index in 0..num_planes {
                             let byte_index = plane_len * plane_index + byte_offset;
-                            let bit = (line[byte_index] >> bit_offset) & 1;
+                            let bit = (line[byte_index] >> (7 - bit_offset)) & 1;
                             value |= bit << plane_index;
                         }
                         pixels.push(value);
@@ -560,7 +570,6 @@ impl BODY {
             1 => {
                 // compressed
                 let mut read_len = 0;
-                //eprintln!("{:?}", header);
                 for _y in 0..header.height() {
                     let mut pos = 0;
 
@@ -600,7 +609,8 @@ impl BODY {
                             pos = next_pos;
                         } else {
                             // eprintln!("pos: {pos:3}, cmd: {cmd:3} == 128");
-                            break;
+                            // break;
+                            // some sources says 128 is EOF, other say its NOP
                         }
                         // eprintln!("pos: {pos:3}, read_len: {read_len:3}");
                         assert!(pos <= line_len);
@@ -616,10 +626,12 @@ impl BODY {
                 }
 
                 if read_len < chunk_len as usize {
+                    // eprintln!("skipping {} byte(s) at end of body", (chunk_len as usize - read_len));
                     reader.seek_relative((chunk_len as usize - read_len) as i64)?;
                 }
             }
             2 => {
+                // VDAT compression
                 // TODO: https://www.atari-wiki.com/index.php?title=IFF_file_format
                 let width  = header.width()  as usize;
                 let height = header.height() as usize;
@@ -680,8 +692,6 @@ impl BODY {
                             decompr.extend_from_slice(&buf[data_offset..next_offset]);
                             data_offset = next_offset;
                         } else if cmd == 1 { // load count from data, RLE
-                            // XXX: Not sure if this is correct, or if count needs to be loaded from command bytes.
-                            //      There's conflicting information. Need an example file to find out.
                             let count = u16::from_be_bytes([buf[data_offset], buf[data_offset + 1]]);
 
                             data_offset += 2;
@@ -726,6 +736,7 @@ impl BODY {
                 }
 
                 if read_len < chunk_len as usize {
+                    // eprintln!("skipping {} byte(s) at end of body", (chunk_len as usize - read_len));
                     reader.seek_relative((chunk_len as usize - read_len) as i64)?;
                 }
             }

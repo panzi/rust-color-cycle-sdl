@@ -114,15 +114,6 @@ pub struct Args {
     #[arg(short, long, default_value_t = false)]
     pub cover: bool,
 
-    /// Swap direction of 8 pixel columns.
-    /// 
-    /// The current implementation of ILBM files is broken for some files and
-    /// swaps the pixels in columns like that. I haven't figured out how do load
-    /// those files correctly (how to detect its such a file), but this option
-    /// can be used to fix the display of those files.
-    #[arg(long, default_value_t = false)]
-    pub ilbm_column_swap: bool,
-
     /// Show list of hotkeys.
     #[arg(long, default_value_t = false)]
     pub help_hotkeys: bool,
@@ -175,7 +166,6 @@ Ctrl+Cursor Right  Move view-port right by 5 pixel");
         osd: args.osd,
         full_screen: args.full_screen,
         cover: args.cover,
-        ilbm_column_swap: args.ilbm_column_swap,
         paths: args.paths,
         ttf: &match sdl2::ttf::init() {
             Ok(ttf) => ttf,
@@ -218,7 +208,6 @@ struct ColorCycleViewerOptions<'font> {
     paths: Vec<PathBuf>,
     full_screen: bool,
     cover: bool,
-    ilbm_column_swap: bool,
     ttf: &'font sdl2::ttf::Sdl2TtfContext,
 }
 
@@ -243,6 +232,7 @@ struct ColorCycleViewer<'font> {
 }
 
 const MESSAGE_DISPLAY_DURATION: Duration = Duration::from_secs(3);
+const ERROR_MESSAGE_DISPLAY_DURATION: Duration = Duration::from_secs(1000 * 365 * 24 * 60 * 60);
 
 impl<'font> ColorCycleViewer<'font> {
     pub fn new(options: ColorCycleViewerOptions<'font>) -> Result<ColorCycleViewer, error::Error> {
@@ -315,15 +305,18 @@ impl<'font> ColorCycleViewer<'font> {
         let mut y_aspect = 1;
 
         let living_world: Result<LivingWorld, error::Error> = match ilbm::ILBM::read(&mut reader) {
-            Ok(mut ilbm) => {
+            Ok(ilbm) => {
                 let ilbm_x_aspect = ilbm.header().x_aspect();
                 let ilbm_y_aspect = ilbm.header().y_aspect();
                 if ilbm_x_aspect != 0 && ilbm_y_aspect != 0 && ilbm_x_aspect != ilbm_y_aspect {
-                    x_aspect = ilbm_x_aspect;
-                    y_aspect = ilbm_y_aspect;
-                }
-                if self.options.ilbm_column_swap {
-                    ilbm.column_swap();
+                    if ilbm_x_aspect % ilbm_y_aspect == 0 {
+                        x_aspect = ilbm_x_aspect / ilbm_y_aspect;
+                    } else if ilbm_y_aspect % ilbm_x_aspect == 0 {
+                        y_aspect = ilbm_y_aspect / ilbm_x_aspect;
+                    } else {
+                        x_aspect = ilbm_x_aspect;
+                        y_aspect = ilbm_y_aspect;
+                    }
                 }
                 let res: Result<CycleImage, _> = ilbm.try_into();
                 match res {
@@ -351,10 +344,12 @@ impl<'font> ColorCycleViewer<'font> {
         let mut living_world = match living_world {
             Ok(living_world) => {
                 if living_world.base().width() == 0 || living_world.base().height() == 0 {
-                    message_end_ts += Duration::from_secs(1000 * 365 * 24 * 60 * 60);
+                    message_end_ts += ERROR_MESSAGE_DISPLAY_DURATION;
                     let _ = write!(message, " {filename}: image of size {} x {} ",
                         living_world.base().width(),
                         living_world.base().height());
+                    x_aspect = 1;
+                    y_aspect = 1;
                     CycleImage::new(None, IndexedImage::new(640, 480, Palette::default()), Box::new([])).into()
                 } else {
                     if self.options.osd {
@@ -370,8 +365,10 @@ impl<'font> ColorCycleViewer<'font> {
                 }
             },
             Err(err) => {
-                message_end_ts += Duration::from_secs(1000 * 365 * 24 * 60 * 60);
+                message_end_ts += ERROR_MESSAGE_DISPLAY_DURATION;
                 let _ = write!(message, " {filename}: {err} ");
+                x_aspect = 1;
+                y_aspect = 1;
                 CycleImage::new(None, IndexedImage::new(640, 480, Palette::default()), Box::new([])).into()
             }
         };
