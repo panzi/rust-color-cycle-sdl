@@ -718,12 +718,25 @@ impl BODY {
                         pixels.len(), decompr.len(), decompr.len() * 8, cmd_cnt as usize - cmd_index);
                     eprintln!();
 
-                    // probably all wrong
                     let width = header.width() as usize;
                     let height = header.height() as usize;
-                    for (byte_index, value) in decompr.iter().cloned().enumerate() {
-                        let x = (byte_index / height) * 8;
+                    let mut words = Vec::with_capacity((decompr.len() + 1) / 2);
+                    for i in (0..decompr.len()).step_by(2) {
+                        words.push(u16::from_be_bytes([decompr[i], decompr[i + 1]]));
+                    }
+
+                    for (byte_index, value) in words.iter().cloned().enumerate() {
+                        let x = (byte_index / height) * 16;
                         let y = byte_index % height;
+
+                        for bit in 0..8 {
+                            let pixel_index = y * width + x + bit + 8;
+                            if pixel_index >= pixels.len() {
+                                eprintln!("pixel_index >= pixels.len(): {} >= {}", pixel_index, pixels.len());
+                                break;
+                            }
+                            pixels[pixel_index] |= (((value as u8) >> (7 - bit)) & 1) << plane_index;
+                        }
 
                         for bit in 0..8 {
                             let pixel_index = y * width + x + bit;
@@ -731,26 +744,10 @@ impl BODY {
                                 eprintln!("pixel_index >= pixels.len(): {} >= {}", pixel_index, pixels.len());
                                 break;
                             }
-                            pixels[pixel_index] |= ((value >> (7 - bit)) & 1) << plane_index;
-                            //pixels[pixel_index] = 1;
+                            pixels[pixel_index] |= ((((value >> 8) as u8) >> (7 - bit)) & 1) << plane_index;
                         }
                     }
-
-                    // for index in 0..pixels.len().min(decompr.len() * 8) {
-                    //     let decompr_index = index / 8;
-                    //     let bit_index = index % 8;
-                    //     pixels[index] |= ((decompr[decompr_index] >> bit_index) & 1) << plane_index;
-                    // }
                 }
-                // XXX: do I need to transpose the image?
-                // TODO: if yes do it in decompr loop wihtout additional allocation
-                // let mut new_pixels = Vec::with_capacity(pixels.len());
-                // for y in 0..header.height() {
-                //     for x in 0..header.width() {
-                //         new_pixels.push(pixels[x as usize * header.height() as usize + y as usize]);
-                //     }
-                // }
-                // pixels = new_pixels;
 
                 if read_len < chunk_len as usize {
                     reader.seek_relative((chunk_len as usize - read_len) as i64)?;
