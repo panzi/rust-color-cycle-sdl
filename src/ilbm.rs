@@ -619,10 +619,8 @@ impl BODY {
                     reader.seek_relative((chunk_len as usize - read_len) as i64)?;
                 }
             }
-            //*
             2 => {
                 // TODO: https://www.atari-wiki.com/index.php?title=IFF_file_format
-                // eprintln!("header: {header:?}");
                 pixels.resize(header.width() as usize * header.height() as usize, 0);
 
                 let mut fourcc = [0u8; 4];
@@ -663,7 +661,6 @@ impl BODY {
                     }
                     let mut data_offset = cmd_cnt as usize;
 
-                    // TODO: nothing works
                     decompr.clear();
                     let mut cmd_index = 2 as usize;
                     eprintln!("cmd_cnt: {cmd_cnt}, sub_chunk_len: {sub_chunk_len}, pixels.len(): {}", pixels.len());
@@ -720,31 +717,21 @@ impl BODY {
 
                     let width = header.width() as usize;
                     let height = header.height() as usize;
-                    let mut words = Vec::with_capacity((decompr.len() + 1) / 2);
-                    for i in (0..decompr.len()).step_by(2) {
-                        words.push(u16::from_be_bytes([decompr[i], decompr[i + 1]]));
-                    }
 
-                    for (byte_index, value) in words.iter().cloned().enumerate() {
-                        let x = (byte_index / height) * 16;
-                        let y = byte_index % height;
+                    for (byte_index, value) in decompr.iter().cloned().enumerate() {
+                        let mut x = (byte_index / 2 / height) * 16;
+                        let y = (byte_index / 2) % height;
 
+                        if byte_index & 1 != 0 {
+                            x += 8;
+                        }
                         for bit in 0..8 {
                             let pixel_index = y * width + x + bit + 8;
                             if pixel_index >= pixels.len() {
                                 eprintln!("pixel_index >= pixels.len(): {} >= {}", pixel_index, pixels.len());
                                 break;
                             }
-                            pixels[pixel_index] |= (((value as u8) >> (7 - bit)) & 1) << plane_index;
-                        }
-
-                        for bit in 0..8 {
-                            let pixel_index = y * width + x + bit;
-                            if pixel_index >= pixels.len() {
-                                eprintln!("pixel_index >= pixels.len(): {} >= {}", pixel_index, pixels.len());
-                                break;
-                            }
-                            pixels[pixel_index] |= ((((value >> 8) as u8) >> (7 - bit)) & 1) << plane_index;
+                            pixels[pixel_index] |= ((value >> (7 - bit)) & 1) << plane_index;
                         }
                     }
                 }
@@ -753,7 +740,6 @@ impl BODY {
                     reader.seek_relative((chunk_len as usize - read_len) as i64)?;
                 }
             }
-            // */
             _ => {
                 return Err(Error::new(
                     ErrorKind::UnsupportedFileFormat,
