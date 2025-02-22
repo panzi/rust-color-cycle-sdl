@@ -722,12 +722,11 @@ impl BODY {
                     let width = header.width() as usize;
                     let height = header.height() as usize;
                     for (byte_index, value) in decompr.iter().cloned().enumerate() {
-                        let bit_index = byte_index * 8;
-                        let x = bit_index / height;
-                        let y = bit_index % height;
+                        let x = (byte_index / height) * 8;
+                        let y = byte_index % height;
 
                         for bit in 0..8 {
-                            let pixel_index = (y + bit) * width + x;
+                            let pixel_index = y * width + x + bit;
                             if pixel_index >= pixels.len() {
                                 eprintln!("pixel_index >= pixels.len(): {} >= {}", pixel_index, pixels.len());
                                 break;
