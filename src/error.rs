@@ -21,7 +21,7 @@ use sdl2::{render::TextureValueError, ttf::FontError, video::WindowBuildError, I
 #[derive(Debug)]
 pub struct Error {
     message: String,
-    cause: Option<Box<dyn std::error::Error>>,
+    source: Option<Box<dyn std::error::Error>>,
 }
 
 impl Error {
@@ -29,15 +29,15 @@ impl Error {
     where S: Into<String> {
         Self {
             message: message.into(),
-            cause: None,
+            source: None,
         }
     }
 
-    pub fn with_cause<S>(message: S, cause: Box<dyn std::error::Error>) -> Self
+    pub fn with_source<S>(message: S, source: Box<dyn std::error::Error>) -> Self
     where S: Into<String> {
         Self {
             message: message.into(),
-            cause: Some(cause),
+            source: Some(source),
         }
     }
 }
@@ -45,8 +45,8 @@ impl Error {
 impl Display for Error {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(cause) = &self.cause {
-            write!(f, "{}: {cause}", self.message)
+        if let Some(source) = &self.source {
+            write!(f, "{}: {source}", self.message)
         } else {
             self.message.fmt(f)
         }
@@ -55,50 +55,50 @@ impl Display for Error {
 
 impl std::error::Error for Error {
     #[inline]
-    fn cause(&self) -> Option<&dyn std::error::Error> {
-        self.cause.as_deref()
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source.as_deref()
     }
 }
 
 impl From<crate::ilbm::Error> for Error {
     #[inline]
     fn from(value: crate::ilbm::Error) -> Self {
-        Self::with_cause("ILBM error", Box::new(value))
+        Self::with_source("ILBM error", Box::new(value))
     }
 }
 
 impl From<std::io::Error> for Error {
     #[inline]
     fn from(value: std::io::Error) -> Self {
-        Self::with_cause("IO error", Box::new(value))
+        Self::with_source("IO error", Box::new(value))
     }
 }
 
 impl From<serde_json::error::Error> for Error {
     #[inline]
     fn from(value: serde_json::error::Error) -> Self {
-        Self::with_cause("JSON error", Box::new(value))
+        Self::with_source("JSON error", Box::new(value))
     }
 }
 
 impl From<TextureValueError> for Error {
     #[inline]
     fn from(value: TextureValueError) -> Self {
-        Self::with_cause("Texture value error", Box::new(value))
+        Self::with_source("Texture value error", Box::new(value))
     }
 }
 
 impl From<FontError> for Error {
     #[inline]
     fn from(value: FontError) -> Self {
-        Self::with_cause("Font error", Box::new(value))
+        Self::with_source("Font error", Box::new(value))
     }
 }
 
 impl From<WindowBuildError> for Error {
     #[inline]
     fn from(value: WindowBuildError) -> Self {
-        Self::with_cause("Window build error", Box::new(value))
+        Self::with_source("Window build error", Box::new(value))
     }
 }
 
@@ -107,10 +107,10 @@ impl From<IntegerOrSdlError> for Error {
     fn from(value: IntegerOrSdlError) -> Self {
         match &value {
             IntegerOrSdlError::IntegerOverflows(_, _) => {
-                Self::with_cause("Integer overflow error", Box::new(value))
+                Self::with_source("Integer overflow error", Box::new(value))
             }
             IntegerOrSdlError::SdlError(_) => {
-                Self::with_cause("SDL error", Box::new(value))
+                Self::with_source("SDL error", Box::new(value))
             }
         }
     }
