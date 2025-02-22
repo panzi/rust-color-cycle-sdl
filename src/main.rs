@@ -284,6 +284,10 @@ impl<'font> ColorCycleViewer<'font> {
     }
 
     pub fn run(&mut self) -> Result<(), error::Error> {
+        self.canvas.set_draw_color(Color::RGBA(0, 0, 0, 255));
+        self.canvas.clear();
+        self.canvas.present();
+
         loop {
             match self.show_image() {
                 Ok(Action::Goto(index)) => {
@@ -420,7 +424,6 @@ impl<'font> ColorCycleViewer<'font> {
 
         let mut message_texture = None;
 
-        self.canvas.set_draw_color(Color::RGBA(0, 0, 0, 255));
         self.canvas.set_integer_scale(true).log_error("canvas.set_integer_scale(true)");
 
         let loop_start_ts = Instant::now();
