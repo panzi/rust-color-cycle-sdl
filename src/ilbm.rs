@@ -712,14 +712,11 @@ impl BODY {
 
                     for (byte_index, value) in decompr.iter().cloned().enumerate() {
                         let word_index = byte_index / 2;
-                        let mut x = (word_index / height) * 16;
+                        let x = (word_index / height) * 16 + 8 * (byte_index & 1);
                         let y = word_index % height;
 
-                        if byte_index & 1 != 0 {
-                            x += 8;
-                        }
                         for bit in 0..8 {
-                            let pixel_index = y * width + x + bit + 8;
+                            let pixel_index = y * width + x + bit;
                             if pixel_index >= pixels.len() {
                                 break;
                             }
