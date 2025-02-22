@@ -621,12 +621,17 @@ impl BODY {
             }
             2 => {
                 // TODO: https://www.atari-wiki.com/index.php?title=IFF_file_format
-                pixels.resize(header.width() as usize * header.height() as usize, 0);
+                let width  = header.width()  as usize;
+                let height = header.height() as usize;
+
+                pixels.resize(width * height, 0);
 
                 let mut fourcc = [0u8; 4];
                 let mut read_len = 0usize;
                 let mut buf = Vec::new();
                 let mut decompr = Vec::with_capacity((header.width() as usize * header.height() as usize + 7) / 8);
+
+
                 for plane_index in 0..num_planes {
                     reader.read_exact(&mut fourcc)?;
                     read_len += 4;
@@ -663,24 +668,21 @@ impl BODY {
 
                     decompr.clear();
                     let mut cmd_index = 2 as usize;
-                    eprintln!("cmd_cnt: {cmd_cnt}, sub_chunk_len: {sub_chunk_len}, pixels.len(): {}", pixels.len());
-                    let mut cmd_nr = 0;
                     while cmd_index < cmd_cnt as usize {
                         let cmd = buf[cmd_index] as i8;
                         cmd_index += 1;
-                        cmd_nr += 1;
 
                         if cmd == 0 { // load count from data, COPY
                             let count = u16::from_be_bytes([buf[data_offset], buf[data_offset + 1]]);
-                            eprintln!("{cmd_nr:2} cmd: {cmd:4}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
 
                             data_offset += 2;
                             let next_offset = data_offset + count as usize * 2;
-                            decompr.extend_from_slice(&buf[data_offset..next_offset.min(buf.len())]); // XXX
+                            decompr.extend_from_slice(&buf[data_offset..next_offset]);
                             data_offset = next_offset;
                         } else if cmd == 1 { // load count from data, RLE
+                            // XXX: Not sure if this is correct, or if count needs to be loaded from command bytes.
+                            //      There's conflicting information. Need an example file to find out.
                             let count = u16::from_be_bytes([buf[data_offset], buf[data_offset + 1]]);
-                            eprintln!("{cmd_nr:2} cmd: {cmd:4}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
 
                             data_offset += 2;
                             let data = &buf[data_offset..(data_offset + 2)];
@@ -690,14 +692,12 @@ impl BODY {
                             }
                         } else if cmd < 0 { // count = -cmd, COPY
                             let count = -(cmd as i32);
-                            eprintln!("{cmd_nr:2} cmd: {cmd:4}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
 
                             let next_offset = data_offset + count as usize * 2;
                             decompr.extend_from_slice(&buf[data_offset..next_offset]);
                             data_offset = next_offset;
                         } else { // cmd > 1: count = cmd, RLE
                             let count = cmd;
-                            eprintln!("{cmd_nr:2} cmd: {cmd:4}, cmd_index: {cmd_index:3}, data_offset: {data_offset:3}, count: {count:3}, decompr.len(): {}", decompr.len());
 
                             let data = &buf[data_offset..(data_offset + 2)];
                             data_offset += 2;
@@ -705,22 +705,15 @@ impl BODY {
                                 decompr.extend_from_slice(data);
                             }
                         }
-                        // XXX
                         if data_offset >= buf.len() {
-                            eprintln!("early break: data_offset >= buf.len() ({} >= {})", data_offset, buf.len());
                             break;
                         }
                     }
-                    eprintln!("pixels.len(): {}, decompr.len(): {}, decompr.len() * 8: {}, cmd_cnt - cmd_index: {}",
-                        pixels.len(), decompr.len(), decompr.len() * 8, cmd_cnt as usize - cmd_index);
-                    eprintln!();
-
-                    let width = header.width() as usize;
-                    let height = header.height() as usize;
 
                     for (byte_index, value) in decompr.iter().cloned().enumerate() {
-                        let mut x = (byte_index / 2 / height) * 16;
-                        let y = (byte_index / 2) % height;
+                        let word_index = byte_index / 2;
+                        let mut x = (word_index / height) * 16;
+                        let y = word_index % height;
 
                         if byte_index & 1 != 0 {
                             x += 8;
@@ -728,7 +721,6 @@ impl BODY {
                         for bit in 0..8 {
                             let pixel_index = y * width + x + bit + 8;
                             if pixel_index >= pixels.len() {
-                                eprintln!("pixel_index >= pixels.len(): {} >= {}", pixel_index, pixels.len());
                                 break;
                             }
                             pixels[pixel_index] |= ((value >> (7 - bit)) & 1) << plane_index;
