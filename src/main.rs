@@ -256,6 +256,7 @@ impl<'font> ColorCycleViewer<'font> {
 
         let canvas = window.into_canvas()
             .accelerated()
+            .present_vsync()
             .build()?;
 
         Ok(ColorCycleViewer {
