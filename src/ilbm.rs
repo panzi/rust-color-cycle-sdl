@@ -972,19 +972,27 @@ impl TryFrom<ILBM> for CycleImage {
         };
 
         for crng in ilbm.crngs() {
-            if crng.flags() & 1 != 0 {
-                //eprintln!("rate: {}", crng.rate());
-                cycles.push(Cycle::new(
-                    crng.low(),
-                    crng.high(),
-                    crng.rate() as u32,
-                    crng.flags() & 2 != 0
-                ));
+            if crng.low() < crng.high() && crng.rate() > 0 {
+                let flags = crng.flags();
+                if flags & 1 != 0 {
+                    if flags > 3 {
+                        eprintln!("Warning: Unsupported CRNG flags: {crng:?}");
+                    }
+
+                    cycles.push(Cycle::new(
+                        crng.low(),
+                        crng.high(),
+                        crng.rate().into(),
+                        flags & 2 != 0
+                    ));
+                } else if flags != 0 {
+                    eprintln!("Warning: Unsupported CRNG flags: {crng:?}");
+                }
             }
         }
 
         for ccrt in ilbm.ccrts() {
-            if ccrt.direction() != 0 {
+            if ccrt.direction() != 0 && ccrt.low() < ccrt.high() {
                 let usec = ccrt.delay_sec() as u64 * 1000_000 + ccrt.delay_usec() as u64;
 
                 // 1s / 60 = 16384x
@@ -1000,12 +1008,18 @@ impl TryFrom<ILBM> for CycleImage {
                 let rate = usec * 8903 / 1000_000;
                 //eprintln!("sec: {}, usec: {} -> rate: {}", ccrt.delay_sec(), ccrt.delay_usec(), rate);
 
-                cycles.push(Cycle::new(
-                    ccrt.low(),
-                    ccrt.high(),
-                    rate as u32,
-                    ccrt.direction() == 1,
-                ));
+                if ccrt.direction() < -1 || ccrt.direction() > 1 {
+                    eprintln!("Warning: Unsupported CCRT direction: {ccrt:?}");
+                }
+
+                if rate > 0 {
+                    cycles.push(Cycle::new(
+                        ccrt.low(),
+                        ccrt.high(),
+                        rate as u32,
+                        ccrt.direction() == 1,
+                    ));
+                }
             }
         }
 
