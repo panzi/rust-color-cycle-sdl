@@ -82,11 +82,13 @@ impl From<&[Rgb]> for Palette {
 pub const LBM_CYCLE_RATE_DIVISOR: u32 = 280;
 
 impl Palette {
+    #[inline]
     pub fn rotate_right(&mut self, low: u8, high: u8, distance: u32) {
         let slice = &mut self.0[low as usize..high as usize + 1];
         slice.rotate_right(distance as usize);
     }
 
+    #[inline]
     pub fn rotate_left(&mut self, low: u8, high: u8, distance: u32) {
         let slice = &mut self.0[low as usize..high as usize + 1];
         slice.rotate_left(distance as usize);

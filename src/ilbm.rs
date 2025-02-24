@@ -916,7 +916,7 @@ impl CCRT {
     where R: Read + Seek {
         if chunk_len < Self::SIZE {
             return Err(Error::new(ErrorKind::BrokenFile,
-                format!("truncated CRNG chunk: {} < {}", chunk_len, Self::SIZE)));
+                format!("truncated CCRT chunk: {} < {}", chunk_len, Self::SIZE)));
         }
 
         let direction = read_i16be(reader)?;
@@ -973,6 +973,7 @@ impl TryFrom<ILBM> for CycleImage {
 
         for crng in ilbm.crngs() {
             if crng.flags() & 1 != 0 {
+                //eprintln!("rate: {}", crng.rate());
                 cycles.push(Cycle::new(
                     crng.low(),
                     crng.high(),
@@ -992,15 +993,18 @@ impl TryFrom<ILBM> for CycleImage {
                 // 16384s / 60 = 1x
 
                 // Is this correct?
-                // See: https://moddingwiki.shikadi.net/wiki/LBM_Format#CRNG:_Colour_range
+                // See: https://moddingwiki.shikadi.net/wiki/LBM_Format#CCRT:_Colour_cycling
 
-                let rate = usec * 16384 / (60 * 1000_000);
+                // XXX: This is just a value I've came up with so I get the same rate in NightFlight.iff as in NightFlight.ilbm
+                //      No idea if this is any correct? Also had to reverse the direction than what I thought it should be.
+                let rate = usec * 8903 / 1000_000;
+                //eprintln!("sec: {}, usec: {} -> rate: {}", ccrt.delay_sec(), ccrt.delay_usec(), rate);
 
                 cycles.push(Cycle::new(
                     ccrt.low(),
                     ccrt.high(),
                     rate as u32,
-                    ccrt.direction() == -1,
+                    ccrt.direction() == 1,
                 ));
             }
         }
