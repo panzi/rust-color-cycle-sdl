@@ -613,16 +613,16 @@ impl<'font> ColorCycleViewer<'font> {
                                     living_world.column_swap();
                                 }
                                 Keycode::UP => {
-                                    self.move_y(get_move_amount(keymod));
+                                    self.move_y(get_move_amount(keymod) * y_aspect as i32);
                                 }
                                 Keycode::DOWN => {
-                                    self.move_y(-get_move_amount(keymod));
+                                    self.move_y(-get_move_amount(keymod) * y_aspect as i32);
                                 }
                                 Keycode::LEFT => {
-                                    self.move_x(get_move_amount(keymod));
+                                    self.move_x(get_move_amount(keymod) * x_aspect as i32);
                                 }
                                 Keycode::RIGHT => {
-                                    self.move_x(-get_move_amount(keymod));
+                                    self.move_x(-get_move_amount(keymod) * x_aspect as i32);
                                 }
                                 Keycode::HOME => {
                                     if self.options.cover {
