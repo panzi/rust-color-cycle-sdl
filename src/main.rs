@@ -284,15 +284,16 @@ impl<'font> ColorCycleViewer<'font> {
         self.canvas.present();
 
         loop {
-            match self.show_image() {
-                Ok(Action::Goto(index)) => {
+            match self.show_image()? {
+                Action::Goto(index) => {
                     self.file_index = index;
                 }
-                Ok(Action::Quit) => {
+                Action::Quit => {
                     return Ok(());
                 }
-                Err(err) => {
-                    return Err(err);
+                Action::OpenFile(filename) => {
+                    self.options.paths.push(filename.into());
+                    self.file_index = self.options.paths.len() - 1;
                 }
             }
         }
@@ -671,6 +672,9 @@ impl<'font> ColorCycleViewer<'font> {
                             }
                         }
                     }
+                    Event::DropFile { filename, .. } => {
+                        return Ok(Action::OpenFile(filename));
+                    }
                     _ => {}
                 }
             }
@@ -901,6 +905,7 @@ fn get_move_amount(keymod: Mod) -> i32 {
 enum Action {
     Goto(usize),
     Quit,
+    OpenFile(String),
 }
 
 fn get_time_of_day_msec(time_speed: u64) -> u64 {
