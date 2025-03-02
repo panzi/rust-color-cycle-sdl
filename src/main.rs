@@ -239,7 +239,7 @@ const MESSAGE_DISPLAY_DURATION: Duration = Duration::from_secs(3);
 const ERROR_MESSAGE_DISPLAY_DURATION: Duration = Duration::from_secs(1000 * 365 * 24 * 60 * 60);
 
 impl<'font> ColorCycleViewer<'font> {
-    pub fn new(options: ColorCycleViewerOptions<'font>) -> Result<ColorCycleViewer, error::Error> {
+    pub fn new(options: ColorCycleViewerOptions<'font>) -> Result<ColorCycleViewer<'font>, error::Error> {
         let sdl = sdl2::init()?;
         let video = sdl.video()?;
         let window = video

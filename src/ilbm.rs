@@ -107,9 +107,8 @@ pub struct BMHD {
     x_aspect: u8,
     y_aspect: u8,
     page_width: i16,
-    page_heigth: i16,
+    page_height: i16,
 }
-
 
 impl BMHD {
     pub const SIZE: u32 = 20;
@@ -175,8 +174,8 @@ impl BMHD {
     }
 
     #[inline]
-    pub fn page_heigth(&self) -> i16 {
-        self.page_heigth
+    pub fn page_height(&self) -> i16 {
+        self.page_height
     }
 
     pub fn read<R>(reader: &mut R, chunk_len: u32) -> Result<Self>
@@ -198,7 +197,7 @@ impl BMHD {
         let x_aspect = read_u8(reader)?;
         let y_aspect = read_u8(reader)?;
         let page_width = read_i16be(reader)?;
-        let page_heigth = read_i16be(reader)?;
+        let page_height = read_i16be(reader)?;
 
         if chunk_len > Self::SIZE {
             // eprintln!("{} unknown bytes in header", (chunk_len - Self::SIZE));
@@ -218,7 +217,7 @@ impl BMHD {
             x_aspect,
             y_aspect,
             page_width,
-            page_heigth,
+            page_height,
         })
     }
 }
