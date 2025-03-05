@@ -14,9 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{fmt::Display, ops::{Index, IndexMut}};
+use std::{fmt::{Debug, Display}, ops::{Index, IndexMut}};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Hash)]
 #[repr(transparent)]
 pub struct Rgb(pub [u8; 3]);
 
@@ -48,6 +48,13 @@ impl Display for Rgb {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Rgb([r, g, b]) = *self;
         write!(f, "#{r:02X}{g:02X}{b:02X}")
+    }
+}
+
+impl Debug for Rgb {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(self, f)
     }
 }
 

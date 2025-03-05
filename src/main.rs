@@ -324,6 +324,7 @@ impl<'font> ColorCycleViewer<'font> {
                         y_aspect = ilbm_y_aspect;
                     }
                 }
+                // eprintln!("ILBM: file_type: {:?}, {:?}", ilbm.file_type(), ilbm.header());
                 let res: Result<CycleImage, _> = ilbm.try_into();
                 match res {
                     Ok(image) => Ok(image.into()),
