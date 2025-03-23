@@ -396,7 +396,7 @@ impl ILBM {
             if chunk_len & 1 != 0 {
                 // Chunks are always padded to an even number of bytes.
                 // This padding byte is not included in the chunk size.
-                let _ = read_u8(reader)?;
+                read_u8(reader)?;
                 pos += 1;
             }
 
@@ -585,14 +585,23 @@ impl BODY {
                 }
 
                 if data_len < chunk_len as usize {
-                    reader.seek_relative((data_len - chunk_len as usize) as i64)?;
+                    reader.seek_relative((chunk_len as usize - data_len) as i64)?;
                 }
             }
             1 => {
                 // compressed
                 let mut read_len = 0;
+
+                // XXX: Why only here and not also in uncompressed?
+                // There must be some other bug?
+                let line_len = match file_type {
+                    FileType::PBM => header.width() as usize,
+                    _ => line_len,
+                };
+
                 for _y in 0..header.height() {
                     let mut pos = 0;
+                    // eprintln!(">>> row: {_y}");
 
                     while pos < line_len {
                         let cmd = read_u8(reader)?;
@@ -602,9 +611,9 @@ impl BODY {
                             // eprintln!("pos: {pos:3}, cmd: {cmd:3} < 128, count: {count}");
                             let next_pos = pos + count;
                             if next_pos > line_len {
-                                // count = line_len - pos;
-                                // next_pos = line_len;
-                                //eprintln!("broken BODY compression, more data than fits into row: {} > {}", next_pos, line_len);
+                                //eprintln!("(A) broken BODY compression, more data than fits into row: {} > {}", next_pos, line_len);
+                                //count = line_len - pos;
+                                //next_pos = line_len;
                                 //break;
                                 return Err(Error::new(ErrorKind::BrokenFile,
                                     format!("broken BODY compression, more data than fits into row: {} > {}", next_pos, line_len)));
@@ -619,9 +628,9 @@ impl BODY {
                             read_len += 1;
                             let next_pos = pos + count;
                             if next_pos > line_len {
+                                //eprintln!("(B) broken BODY compression, more data than fits into row: {} > {}", next_pos, line_len);
                                 // count = line_len - pos;
-                                // next_pos = line_len;
-                                //eprintln!("broken BODY compression, more data than fits into row: {} > {}", next_pos, line_len);
+                                //next_pos = line_len;
                                 //break;
                                 return Err(Error::new(ErrorKind::BrokenFile,
                                     format!("broken BODY compression, more data than fits into row: {} > {}", next_pos, line_len)));
