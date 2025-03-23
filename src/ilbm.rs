@@ -821,8 +821,10 @@ pub struct CAMG {
 
 impl CAMG {
     pub const SIZE: u32 = 4;
+    pub const HIRES: u32 = 0x8000;
     pub const HAM: u32 = 0x800;
     pub const EHB: u32 = 0x80;
+    pub const LACE: u32 = 0x4;
 
     #[inline]
     pub fn viewport_mode(&self) -> u32 {

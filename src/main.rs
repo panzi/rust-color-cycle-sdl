@@ -30,6 +30,7 @@ use std::io::{BufReader, Seek};
 use std::u64;
 
 use color::Rgb;
+use ilbm::CAMG;
 use palette::Palette;
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::{Keycode, Mod};
@@ -324,7 +325,21 @@ impl<'font> ColorCycleViewer<'font> {
                         y_aspect = ilbm_y_aspect;
                     }
                 }
-                // eprintln!("ILBM: file_type: {:?}, {:?}", ilbm.file_type(), ilbm.header());
+                let viewport_mode = ilbm.camg().map(CAMG::viewport_mode).unwrap_or(0);
+                eprintln!("ILBM: file_type: {:?}, {:?}", ilbm.file_type(), ilbm.header());
+                eprintln!("colors: {}", ilbm.cmap().map_or(0, |cmap| cmap.colors().len()));
+                eprint!("viewport_mode: 0x{viewport_mode:x}");
+                for &(flag, name) in &[
+                    (CAMG::EHB, "EHB"),
+                    (CAMG::HAM, "HAM"),
+                    (CAMG::HIRES, "HIRES"),
+                    (CAMG::LACE, "LACE"),
+                ] {
+                    if viewport_mode & flag != 0 {
+                        eprint!(" {name}");
+                    }
+                }
+                eprintln!();
                 let res: Result<CycleImage, _> = ilbm.try_into();
                 match res {
                     Ok(image) => Ok(image.into()),
